@@ -141,4 +141,24 @@ Installing on the phone:
 - If Android says "App not installed" although the APK is valid: free up storage and check the phone's security settings (Play Protect, the maker's app blocker). Both mattered on the first install.
 Open:
 - No app icon yet (Android's default icon).
-Next: step 2, paste or share a Wikipedia link and hear it read aloud live.
+
+Step 2 (hear a Wikipedia article): built, waiting for the owner to test on the phone.
+Done:
+- Paste a link (Fetch, or "Paste and fetch") or share one to Article Audio from the Wikipedia app or a browser. WikiLink.kt accepts en.wikipedia.org and en.m.wikipedia.org links, including links inside shared text; other languages are refused with a message.
+- WikipediaClient.kt fetches plain text from the Action API (prop=extracts, explaintext, follows redirects) with a generic descriptive User-Agent. This is the app's only network call.
+- ArticleText.kt: drops reference-type sections (References, Notes, See also, External links, and so on) and their subsections, speaks headings as "Section: X." with a 0.7 s pause, skips headings with no text, splits paragraphs into sentences without breaking after common abbreviations or initials, and splits over-long sentences at commas.
+- Reader.kt reads one sentence at a time: Play/Pause, Back, Next, Stop. Shows the current sentence, its number and an estimate of minutes left. Lives for the whole app process, so rotating the phone does not stop it.
+- Logged: shared text received, fetch time and size, sentence count, play/pause positions, finish, and every error.
+- Test crash moved to the Log screen's top bar.
+- Unit tests: WikiLinkTest (13), ArticleTextTest (11).
+Owner should test on the phone:
+- Share an article from the Wikipedia app or browser to Article Audio; it should fetch and show the title.
+- Play, Pause, Back, Next, Stop. Headings should be followed by a short pause.
+- Try a long article and leave it reading for a few minutes with the screen on.
+- Try a non-Wikipedia link and a link with no internet: both should show a clear message and a Log entry.
+Open:
+- Not yet tested against the live API from the build machine (it cannot reach Wikipedia); the first real fetch is on the phone.
+- Reading with the screen off may be stopped by Android; a proper background service with lock-screen controls is step 4.
+- Notation such as dates, ranges and units is read as written until step 3. Maths formulas may come through as markup.
+- The User-Agent has no contact address; Wikimedia asks for one. Add the repo URL if the owner wants.
+Next: step 3, cleanup rules with tests and a preview of the text.

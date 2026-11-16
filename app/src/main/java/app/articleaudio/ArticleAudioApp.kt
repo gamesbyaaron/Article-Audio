@@ -15,6 +15,8 @@ class ArticleAudioApp : Application() {
             previous?.uncaughtException(thread, error)
         }
 
+        Reader.init(this)
+
         DebugLog.i(
             "App started: version ${BuildConfig.VERSION_NAME}, " +
                 "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), " +
