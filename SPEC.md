@@ -142,23 +142,34 @@ Installing on the phone:
 Open:
 - No app icon yet (Android's default icon).
 
-Step 2 (hear a Wikipedia article): built, waiting for the owner to test on the phone.
+Step 2 (hear a Wikipedia article): done. Confirmed on the owner's phone: sharing and pasting a link works, the fetch works, reading sounds good.
+- WikiLink.kt accepts en.wikipedia.org and en.m.wikipedia.org links, including links inside shared text. WikipediaClient.kt fetches plain text from the Action API (prop=extracts, explaintext, follows redirects); this is the app's only network call.
+- ArticleText.kt drops reference-type sections and their subsections, speaks headings as "Section: X." with a 0.7 s pause, and skips headings with no text.
+
+Step 3 (continuous reading, cleanup rules, checking screens): built, waiting for the owner to test on the phone.
 Done:
-- Paste a link (Fetch, or "Paste and fetch") or share one to Article Audio from the Wikipedia app or a browser. WikiLink.kt accepts en.wikipedia.org and en.m.wikipedia.org links, including links inside shared text; other languages are refused with a message.
-- WikipediaClient.kt fetches plain text from the Action API (prop=extracts, explaintext, follows redirects) with a generic descriptive User-Agent. This is the app's only network call.
-- ArticleText.kt: drops reference-type sections (References, Notes, See also, External links, and so on) and their subsections, speaks headings as "Section: X." with a 0.7 s pause, skips headings with no text, splits paragraphs into sentences without breaking after common abbreviations or initials, and splits over-long sentences at commas.
-- Reader.kt reads one sentence at a time: Play/Pause, Back, Next, Stop. Shows the current sentence, its number and an estimate of minutes left. Lives for the whole app process, so rotating the phone does not stop it.
-- Logged: shared text received, fetch time and size, sentence count, play/pause positions, finish, and every error.
-- Test crash moved to the Log screen's top bar.
-- Unit tests: WikiLinkTest (13), ArticleTextTest (11).
+- Continuous reading. The speech engine now gets a whole paragraph at a time (ArticleText builds "chunks"), with three more queued ahead, so there is no gap between sentences. The engine's word-position reports (onRangeStart) say which sentence is being spoken, so the on-screen sentence, Pause, Back and Next still work by sentence. If an engine does not report positions, tracking falls back to paragraphs; the Log says which ("Speech engine reports word positions...").
+- Cleanup rules (Cleanup.kt, pure Kotlin, run on every paragraph and heading before sentence splitting):
+  - citation markers removed; pronunciation guides in brackets removed (IPA between slashes or square brackets), keeping anything else in the same brackets
+  - leftover "(; ...)" punctuation and empty "()" from Wikipedia's plain text; "{\displaystyle ...}" maths markup removed
+  - date ranges: 1964–1968, 1964–68, 12–15 March 1966, March 12–15, 1966, June–July 1954, full date to full date, "–present"
+  - brackets holding only a date range become ", X to Y," (or "from X to Y" for month-and-year ranges); (born X), (b. 1950), (died X), (d. 1987), (r. 1509–1547)
+  - c. / ca. before a number become "circa"; a real minus sign before a number becomes "minus"
+  - units after a number (km, m, cm, mm, mi, ft, kg, g, lb, mph, km/h, °C, °F, km2, m2, sq mi, sq ft) are spelled out and a following conversion in brackets is dropped; ranges like 10–15 km work; "in" is only treated as inches when a conversion follows
+  - No. 3, e.g., i.e., vs., approx.; " & " between words becomes "and"
+  - left alone: scores and page ranges (3–1), St., Roman numerals, R&D, AT&T, $5 m, 5 m/s, ISO dates, any other brackets
+- Full text screen: the whole cleaned article, current sentence highlighted, follows along while playing; tap a sentence to jump to it.
+- Changes screen: every rewrite the rules made in this article as before → after, with Copy all. The Log also records the number of changes per rule.
+- Unit tests: CleanupTest (47, one or more per rule plus the leave-unchanged cases), ArticleTextTest (15), WikiLinkTest (13), LogFormatTest (4).
 Owner should test on the phone:
-- Share an article from the Wikipedia app or browser to Article Audio; it should fetch and show the title.
-- Play, Pause, Back, Next, Stop. Headings should be followed by a short pause.
-- Try a long article and leave it reading for a few minutes with the screen on.
-- Try a non-Wikipedia link and a link with no internet: both should show a clear message and a Log entry.
+- Play an article: it should flow with no gap between sentences, and the sentence shown should keep up with the voice. Check the Log line about word positions.
+- Pause and Play again (it restarts at the current sentence), Back, Next.
+- Full text: highlight follows the voice; tap a sentence further down and it jumps there.
+- Changes: skim for rewrites that are wrong or sound bad, and for things that should have been rewritten but were not. Copy all and paste them into the chat.
 Open:
-- Not yet tested against the live API from the build machine (it cannot reach Wikipedia); the first real fetch is on the phone.
+- The rules were written from the spec's examples and from memory of how Wikipedia's plain text looks; the build machine cannot reach Wikipedia. Real articles will show what is missing: maths formulas may leave stray symbols, and foreign-language name lists in brackets are read as written.
+- Units used as adjectives come out plural ("a 35 millimeters film").
+- No editing of the text before reading (the original spec had an editable preview).
 - Reading with the screen off may be stopped by Android; a proper background service with lock-screen controls is step 4.
-- Notation such as dates, ranges and units is read as written until step 3. Maths formulas may come through as markup.
 - The User-Agent has no contact address; Wikimedia asks for one. Add the repo URL if the owner wants.
-Next: step 3, cleanup rules with tests and a preview of the text.
+Next: step 4, library (saved articles, resume position), background playback with lock-screen controls, voice and speed settings, attribution.

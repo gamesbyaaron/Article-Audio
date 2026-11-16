@@ -1,11 +1,36 @@
 package app.articleaudio
 
-/** One piece of speech: a sentence, or a heading that gets a short pause after it. */
-data class Utterance(val text: String, val isHeading: Boolean = false)
+/** One sentence (or heading) as shown on screen, and where it sits inside its chunk. */
+data class Sentence(val text: String, val chunk: Int, val start: Int, val isHeading: Boolean) {
+    val end: Int get() = start + text.length
+}
 
 /**
- * Turns Wikipedia's plain-text article (headings written as "== Title ==") into a list of
- * sentences to speak. Pure Kotlin, unit tested.
+ * A piece of text handed to the speech engine in one go: a heading, or a paragraph (or part of
+ * a very long one). Speaking whole paragraphs lets the voice flow from sentence to sentence.
+ */
+class Chunk(val text: String, val isHeading: Boolean, val firstSentence: Int, val sentenceCount: Int)
+
+class Article(
+    val title: String,
+    val chunks: List<Chunk>,
+    val sentences: List<Sentence>,
+    val changes: List<Change>,
+) {
+    /** The sentence that contains character [offset] of chunk [chunk]. */
+    fun sentenceAt(chunk: Int, offset: Int): Int {
+        val c = chunks[chunk]
+        var found = c.firstSentence
+        for (i in c.firstSentence until c.firstSentence + c.sentenceCount) {
+            if (sentences[i].start <= offset) found = i else break
+        }
+        return found
+    }
+}
+
+/**
+ * Turns Wikipedia's plain-text article (headings written as "== Title ==") into chunks and
+ * sentences to speak, running the cleanup rules on the way. Pure Kotlin, unit tested.
  */
 object ArticleText {
     /** Sections that are lists of sources or links, not prose. Their subsections are skipped too. */
@@ -18,35 +43,68 @@ object ArticleText {
 
     private class Section(val level: Int, val title: String?, val paragraphs: MutableList<String> = mutableListOf())
 
-    fun toUtterances(title: String, extract: String, maxChars: Int = 3000): List<Utterance> {
+    fun build(title: String, extract: String, maxChars: Int = 3000): Article {
+        val chunks = mutableListOf<Chunk>()
+        val sentences = mutableListOf<Sentence>()
+        val changes = mutableListOf<Change>()
+
+        fun clean(text: String): String {
+            val result = Cleanup.apply(text)
+            changes += result.changes
+            return result.text
+        }
+
+        fun addHeading(text: String) {
+            sentences += Sentence(text, chunks.size, 0, isHeading = true)
+            chunks += Chunk(text, isHeading = true, firstSentence = sentences.size - 1, sentenceCount = 1)
+        }
+
+        fun addParagraph(paragraph: String) {
+            val pieces = sentences(paragraph).flatMap { splitLong(it, maxChars) }
+            var text = StringBuilder()
+            var first = sentences.size
+            fun flush() {
+                if (text.isEmpty()) return
+                chunks += Chunk(text.toString(), isHeading = false, firstSentence = first, sentenceCount = sentences.size - first)
+                text = StringBuilder()
+                first = sentences.size
+            }
+            for (piece in pieces) {
+                if (text.isNotEmpty() && text.length + 1 + piece.length > maxChars) flush()
+                if (text.isNotEmpty()) text.append(' ')
+                sentences += Sentence(piece, chunks.size, text.length, isHeading = false)
+                text.append(piece)
+            }
+            flush()
+        }
+
         val sections = parseSections(extract)
-        val out = mutableListOf(Utterance(withStop(title), isHeading = true))
+        addHeading(withStop(title))
         for ((i, section) in sections.withIndex()) {
             if (section.title != null && hasContent(sections, i)) {
-                out += Utterance("Section: ${withStop(section.title)}", isHeading = true)
+                addHeading("Section: ${withStop(clean(section.title))}")
             }
             for (paragraph in section.paragraphs) {
-                for (sentence in sentences(paragraph)) {
-                    splitLong(sentence, maxChars).forEach { out += Utterance(it) }
-                }
+                val cleaned = clean(paragraph)
+                if (cleaned.isNotEmpty()) addParagraph(cleaned)
             }
         }
-        return out
+        return Article(title, chunks, sentences, changes)
     }
 
     private fun parseSections(extract: String): List<Section> {
         val sections = mutableListOf(Section(level = 1, title = null))
-        var skipBelowOrAt = Int.MAX_VALUE // while skipping, the level of the skipped heading
+        var skippedLevel = Int.MAX_VALUE // while skipping, the level of the skipped heading
         var skipping = false
         for (line in extract.lines()) {
             val m = heading.matchEntire(line.trim())
             if (m != null) {
                 val level = m.groupValues[1].length
                 val name = m.groupValues[2]
-                if (skipping && level > skipBelowOrAt) continue
+                if (skipping && level > skippedLevel) continue
                 skipping = name.lowercase() in SKIPPED_SECTIONS
                 if (skipping) {
-                    skipBelowOrAt = level
+                    skippedLevel = level
                     continue
                 }
                 sections += Section(level, name)
@@ -69,7 +127,7 @@ object ArticleText {
     }
 
     private fun withStop(text: String): String =
-        if (text.last() in ".!?") text else "$text."
+        if (text.isEmpty() || text.last() in ".!?") text else "$text."
 
     private val ABBREVIATIONS = setOf(
         "mr.", "mrs.", "ms.", "dr.", "prof.", "st.", "jr.", "sr.", "vs.", "e.g.", "i.e.", "c.", "ca.",
