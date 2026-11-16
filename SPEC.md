@@ -125,20 +125,20 @@ Fetch articles as plain text from Wikipedia's API (it already drops tables, info
 Revised order: 1) pipeline plus a Speak button, 2) paste or share a link and hear it read live, 3) cleanup rules with tests and a preview, 4) library, resume, lock-screen controls, speed and voice, attribution, 5) optional extras (audio export, pronunciation list, queue).
 
 Status
-Step 1 (pipeline plus Speak button): built, waiting for the owner to install and test.
+Step 1 (pipeline plus Speak button): done. Confirmed on the owner's phone: installs, speaks, the Log screen shows events and records crashes.
 Done:
 - Kotlin + Compose app, package app.articleaudio, minSdk 26. Home screen: version with commit hash, text box, Speak, Stop, Test crash. Log screen: Copy all, Refresh, Clear.
 - Debug log (DebugLog.kt): writes to a file in app storage, records app start with device info, text-to-speech engine and voice, each speak start/finish/error, and full stack traces of crashes.
-- Fixed signing key keystore/debug.jks (password "android"), committed on purpose; every build is signed with it.
-- GitHub Actions (.github/workflows/build.yml): on push to main runs unit tests, builds the APK, and replaces the release tagged "latest" with article-audio.apk. Version name is 0.1.<run number> (<commit hash>).
+- Fixed signing key keystore/debug.jks (password "android"), committed on purpose; every build is signed with it. The repo is public, so the key is public too; acceptable for a personal sideloaded app.
+- GitHub Actions (.github/workflows/build.yml):
+  - Push to main: runs unit tests, builds and verifies the APK (apksigner, aapt2), then publishes it twice: a permanent release "Build N (hash)" tagged build-N, and the rolling release tagged "latest" behind the fixed link. Only the newest 20 build-N releases are kept.
+  - Pull requests: test and build only, nothing published.
+  - Version name is 0.1.<run number> (<commit hash>); versionCode is the run number.
 - Unit tests for log formatting (LogFormatTest.kt).
-Owner should test on the phone:
-- Install from the release; the version on screen matches the release title's hash.
-- Speak reads the text aloud; Stop stops it.
-- Log shows the start-up line and the TTS engine; Copy all copies it.
-- Test crash closes the app; reopen, the Log shows the CRASH entry with a stack trace.
-- Push any change, install the new build over the old one without uninstalling.
+Installing on the phone:
+- Newest build: github.com/gamesbyaaron/Article-Audio/releases/latest/download/article-audio.apk
+- Older builds: the Releases page, "Build N (hash)". Android will not install an older version over a newer one: uninstall first, which erases app data.
+- If Android says "App not installed" although the APK is valid: free up storage and check the phone's security settings (Play Protect, the maker's app blocker). Both mattered on the first install.
 Open:
-- The workflow also runs on the ccr-d3a27e4f-2qpss9 working branch so the first release could be checked before merging; remove that trigger once main builds.
-- If the repo is private, the release download needs you signed in to GitHub in the phone's browser.
 - No app icon yet (Android's default icon).
+Next: step 2, paste or share a Wikipedia link and hear it read aloud live.
