@@ -244,4 +244,14 @@ Open:
 - Rename, Refresh and Delete are only on the open article, not on each row of the list.
 - Articles fetched before this build are not in the library; fetch them again.
 
+Owner confirmed step 4c (build 15) works.
+
+Polish, build 1 of 2 ("make it pretty", generic; owner, 17 November 2026): built, waiting for the owner to test.
+- Navigation: a Nav object holds the current screen (survives rotation). Library is the home screen; the player is its own screen; Full text and Changes open from the player; Log moved to Settings > Developer with the version number.
+- Library screen: "Continue listening" / "Now playing" card for the open article with a play/pause button, then article cards with a progress bar, percent, length, date and a download icon; an empty-state hint; an "Add article" floating button opens a paste dialog. Sharing a link opens the player.
+- Player screen: title, live/downloaded-audio chips, the current sentence in a large serif caption (tap for full text), progress bar with times, speed, back 15, a large play/pause button, forward 15, Restart; download section; attribution. Overflow menu: Open on Wikipedia, Cleanup changes, Rename, Refresh, Delete.
+- Full text screen: book-style serif text, larger line height and margins.
+- Icons are vector drawables in res/drawable (no icon library added).
+Next, polish build 2: app icon, colour scheme and dark mode, transitions, first-run hints.
+
 After 4c the personal app is functionally complete; what follows is optional polish (queue, pronunciation list, more rules, icon and design) and then the pinned public version.
