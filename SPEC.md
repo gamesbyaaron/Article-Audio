@@ -265,3 +265,22 @@ Open:
 
 
 After 4c the personal app is functionally complete; what follows is optional polish (queue, pronunciation list, more rules, icon and design) and then the pinned public version.
+
+Owner confirmed build 19 (search, pictures, Full text player) works.
+
+Feature plan (owner, 17 November 2026), in this order:
+- A: section list, sleep timer, topic search, background sound (in Settings).
+- B: Home page with bottom tabs (Home, Search, Library); Article of the Day hero and rows from Wikipedia's feed (featured, most read) plus a placeholder developer topic list, each row a search for now. Revisit "library" vs "saved" then.
+- C: queue ("play next", "add to queue", reorder, remove, kept across restarts, auto-advance). Lock screen gets two pairs of buttons: back/forward 15 seconds and previous/next article.
+- D: personal collections (many-to-many), playable as a queue.
+Not now: storage management, download speed.
+
+Build A: built, merged on a passing build at the owner's request, waiting for the owner to test.
+- Sections: Article.sections lists "Beginning" plus every spoken heading. A Sections dialog on the player and the Full text screen jumps there (Reader.jumpToSection). New downloads save where each section starts (<title>.sections next to the .m4a, SectionTimes.kt); older downloads estimate from text position.
+- Sleep timer on the player: 15/30/45/60 minutes, end of this section, end of this article, or off. The button shows a countdown. When time is up, downloaded audio fades over about six seconds; live reading finishes its sentence and stops (the speech engine cannot fade mid-sentence). The background sound fades with it.
+- Topic search: as-you-type title suggestions as before; pressing the keyboard's search key shows up to 20 articles about the topic from Wikipedia's full-text search.
+- Background sound (Settings): Off, Rain, Wind, Beach, generated from shaped noise in code (Noise.kt, no recordings or licences), with its own volume. Plays and fades with the reading; choosing one plays a six-second preview when nothing is playing. In-app only; not mixed into downloads.
+- Unit tests: SectionsTest (5), NoiseTest (2).
+Open:
+- Not run on a phone. The generated sounds have never been listened to; they may need tuning by ear.
+

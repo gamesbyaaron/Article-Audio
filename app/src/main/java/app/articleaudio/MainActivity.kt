@@ -95,6 +95,10 @@ import androidx.compose.ui.focus.focusRequester
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.text.input.ImeAction
 import java.text.DateFormat
 import java.util.Date
 
@@ -408,21 +412,31 @@ private fun SearchScreen(onBack: () -> Unit) {
     var searching by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf("") }
     var pasting by remember { mutableStateOf(false) }
+    // Set when the search key is pressed: then show articles about the topic, not just titles.
+    var submitted by rememberSaveable { mutableStateOf("") }
     val focus = remember { FocusRequester() }
+    val topic = submitted.isNotEmpty() && submitted == query.trim()
 
     LaunchedEffect(Unit) { focus.requestFocus() }
-    LaunchedEffect(query) {
+    LaunchedEffect(query, submitted) {
         val q = query.trim()
         if (q.isEmpty()) {
             results = emptyList()
             problem = ""
             return@LaunchedEffect
         }
-        delay(300) // wait for a pause in typing
+        if (!topic) delay(300) // wait for a pause in typing
         searching = true
         try {
-            results = withContext(Dispatchers.IO) { WikipediaClient.search(q) }
-            problem = if (results.isEmpty()) "No articles start with \"$q\"." else ""
+            results = withContext(Dispatchers.IO) {
+                if (topic) WikipediaClient.searchTopic(q) else WikipediaClient.search(q)
+            }
+            problem = when {
+                results.isNotEmpty() -> ""
+                topic -> "No articles found about \"$q\"."
+                else -> "No titles start with \"$q\". Press search to look for articles about it."
+            }
+            if (topic) DebugLog.i("Topic search \"$q\": ${results.size} articles")
         } catch (t: Throwable) {
             DebugLog.e("Search for \"$q\" failed", t)
             problem = "Could not search: ${t.message ?: t.javaClass.simpleName}. Check the internet connection."
@@ -454,8 +468,18 @@ private fun SearchScreen(onBack: () -> Unit) {
                         if (searching) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                     },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { submitted = query.trim() }),
                     modifier = Modifier.fillMaxWidth().focusRequester(focus).padding(bottom = 8.dp),
                 )
+                if (query.isNotBlank()) {
+                    Text(
+                        if (topic) "Articles about \"${query.trim()}\"" else "Titles starting with \"${query.trim()}\" · press search for articles about it",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                    )
+                }
             }
             if (problem.isNotEmpty()) {
                 item {
@@ -668,9 +692,6 @@ private fun PlayerBody(article: Article, saved: LibraryEntry, onPlay: () -> Unit
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = { Reader.changeSpeed(nextSpeed(speed)) }) {
-                Text("${trimSpeed(speed)}×", style = MaterialTheme.typography.titleMedium)
-            }
             SkipButton(R.drawable.ic_replay, "Back 15 seconds") { Reader.skipSeconds(-15) }
             FilledIconButton(
                 onClick = { if (Reader.playing) Reader.pause() else onPlay() },
@@ -683,8 +704,24 @@ private fun PlayerBody(article: Article, saved: LibraryEntry, onPlay: () -> Unit
                 )
             }
             SkipButton(R.drawable.ic_forward, "Forward 15 seconds") { Reader.skipSeconds(15) }
+        }
+
+        var sleepMenu by remember { mutableStateOf(false) }
+        var sectionsOpen by remember { mutableStateOf(false) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = { Reader.changeSpeed(nextSpeed(speed)) }) {
+                Text("${trimSpeed(speed)}×", style = MaterialTheme.typography.titleMedium)
+            }
+            TextButton(onClick = { sleepMenu = true }) { Text(sleepLabel()) }
+            TextButton(onClick = { sectionsOpen = true }) { Text("Sections") }
             TextButton(onClick = { Reader.stop() }) { Text("Restart") }
         }
+        if (sleepMenu) SleepDialog(onDone = { sleepMenu = false })
+        if (sectionsOpen) SectionsDialog(article, onDone = { sectionsOpen = false })
 
         HorizontalDivider()
         DownloadSection(article)
@@ -811,6 +848,8 @@ private fun trimSpeed(speed: Float): String = "%.2f".format(speed).trimEnd('0').
 @Composable
 private fun TextScreen(onBack: () -> Unit, onPlay: () -> Unit) {
     val article = Reader.article
+    var textSections by remember { mutableStateOf(false) }
+    if (textSections && article != null) SectionsDialog(article, onDone = { textSections = false })
     val listState = rememberLazyListState()
     val currentChunk = article?.sentences?.getOrNull(Reader.index)?.chunk ?: 0
 
@@ -823,6 +862,9 @@ private fun TextScreen(onBack: () -> Unit, onPlay: () -> Unit) {
             TopAppBar(
                 title = { Text(article?.title ?: "Full text", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
+                actions = {
+                    if (article != null) TextButton(onClick = { textSections = true }) { Text("Sections") }
+                },
             )
         },
         bottomBar = { if (article != null) MiniPlayer(article, onPlay) },
@@ -840,6 +882,81 @@ private fun TextScreen(onBack: () -> Unit, onPlay: () -> Unit) {
             }
         }
     }
+}
+
+/** "Sleep", or how long is left on the sleep timer. Updates every second. */
+@Composable
+private fun sleepLabel(): String {
+    val mode = Reader.sleepMode
+    val now by produceState(System.currentTimeMillis(), mode, Reader.sleepEndsAt) {
+        while (mode == "time") {
+            value = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    return when (mode) {
+        "time" -> "Sleep " + clock(((Reader.sleepEndsAt - now) / 1000).toInt().coerceAtLeast(0))
+        "section" -> "Sleep: section end"
+        "article" -> "Sleep: article end"
+        else -> "Sleep"
+    }
+}
+
+@Composable
+private fun SleepDialog(onDone: () -> Unit) {
+    val choose = { mode: String, minutes: Int ->
+        Reader.setSleep(mode, minutes)
+        onDone()
+    }
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("Sleep timer") },
+        text = {
+            Column {
+                for (minutes in listOf(15, 30, 45, 60)) {
+                    TextButton(onClick = { choose("time", minutes) }) { Text("$minutes minutes") }
+                }
+                TextButton(onClick = { choose("section", 0) }) { Text("End of this section") }
+                TextButton(onClick = { choose("article", 0) }) { Text("End of this article") }
+                if (Reader.sleepMode.isNotEmpty()) {
+                    TextButton(onClick = { Reader.clearSleep(); onDone() }) { Text("Turn off timer") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDone) { Text("Close") } },
+    )
+}
+
+/** The article's section headings; tap one to jump there. The current section is highlighted. */
+@Composable
+private fun SectionsDialog(article: Article, onDone: () -> Unit) {
+    val current = article.sectionAt(Reader.index.coerceIn(0, article.sentences.size - 1))
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("Sections") },
+        text = {
+            LazyColumn(state = rememberLazyListState(initialFirstVisibleItemIndex = maxOf(0, current - 2))) {
+                items(article.sections.size) { i ->
+                    val section = article.sections[i]
+                    Text(
+                        section.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = if (i == current && !Reader.audioMode) FontWeight.Bold else FontWeight.Normal,
+                        color = if (i == current && !Reader.audioMode) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                Reader.jumpToSection(section)
+                                onDone()
+                            }
+                            .padding(vertical = 10.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDone) { Text("Close") } },
+    )
 }
 
 /** A compact player along the bottom of the Full text screen. Tap the title to open the full player. */
@@ -986,6 +1103,7 @@ private fun SettingsScreen(onBack: () -> Unit) {
                     valueRange = 0.5f..2.5f,
                     steps = 7,
                 )
+                BackgroundSoundSettings()
                 Text(
                     "Voice",
                     style = MaterialTheme.typography.titleMedium,
@@ -1017,6 +1135,35 @@ private fun SettingsScreen(onBack: () -> Unit) {
                 OutlinedButton(onClick = { Nav.screen = "log" }) { Text("Debug log") }
             }
         }
+    }
+}
+
+/** Pick a background sound and its volume. Choosing one plays a short preview. */
+@Composable
+private fun BackgroundSoundSettings() {
+    var level by remember { mutableFloatStateOf(Ambient.volume) }
+    Text("Background sound", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+    Text(
+        "Plays quietly under the reading. Tap one to hear it.",
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((kind, label) in Noise.KINDS) {
+            FilterChip(selected = Ambient.kind == kind, onClick = { Ambient.choose(kind) }, label = { Text(label) })
+        }
+    }
+    if (Ambient.kind != "off") {
+        Text("Background volume", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+        Slider(
+            value = level,
+            onValueChange = {
+                level = it
+                Ambient.changeVolume(it)
+            },
+            onValueChangeFinished = { Ambient.previewVolume() },
+            valueRange = 0.05f..1f,
+        )
     }
 }
 

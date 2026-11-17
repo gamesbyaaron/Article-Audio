@@ -41,6 +41,27 @@ object WikipediaClient {
         return results.sortedBy { it.first }.map { it.second }
     }
 
+    /** Articles about a topic, most relevant first, from Wikipedia's full-text search. */
+    fun searchTopic(query: String): List<SearchResult> {
+        val json = getJson(
+            "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2" +
+                "&generator=search&gsrnamespace=0&gsrlimit=20" +
+                "&prop=pageimages|description&piprop=thumbnail&pithumbsize=120&pilicense=free" +
+                "&gsrsearch=" + URLEncoder.encode(query, "UTF-8")
+        )
+        val pages = json.optJSONObject("query")?.optJSONArray("pages") ?: return emptyList()
+        val results = mutableListOf<Pair<Int, SearchResult>>()
+        for (i in 0 until pages.length()) {
+            val page = pages.getJSONObject(i)
+            results += page.optInt("index", i) to SearchResult(
+                title = page.optString("title"),
+                description = page.optString("description"),
+                thumbnail = page.optJSONObject("thumbnail")?.optString("source")?.ifEmpty { null },
+            )
+        }
+        return results.sortedBy { it.first }.map { it.second }
+    }
+
     /**
      * The article's lead picture, only if it is under a free licence (Wikipedia also shows
      * non-free pictures, which may not be reused). Null if there is none.

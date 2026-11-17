@@ -11,12 +11,26 @@ data class Sentence(val text: String, val chunk: Int, val start: Int, val isHead
  */
 class Chunk(val text: String, val isHeading: Boolean, val firstSentence: Int, val sentenceCount: Int)
 
+/** A heading in the article, and the sentence it starts at. */
+data class ArticleSection(val sentence: Int, val title: String)
+
 class Article(
     val title: String,
     val chunks: List<Chunk>,
     val sentences: List<Sentence>,
     val changes: List<Change>,
 ) {
+    /** "Beginning" followed by every spoken section heading, in order. */
+    val sections: List<ArticleSection> by lazy {
+        listOf(ArticleSection(0, "Beginning")) +
+            sentences.withIndex()
+                .filter { it.index > 0 && it.value.isHeading }
+                .map { ArticleSection(it.index, it.value.text.removePrefix("Section: ").removeSuffix(".")) }
+    }
+
+    /** Position in [sections] of the section that contains [sentence]. */
+    fun sectionAt(sentence: Int): Int = sections.indexOfLast { it.sentence <= sentence }.coerceAtLeast(0)
+
     /** For each sentence, how many characters of the article come before it. */
     val startChars: IntArray by lazy {
         var total = 0
