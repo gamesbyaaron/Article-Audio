@@ -22,6 +22,8 @@ data class LibraryEntry(
     val imageCredit: String = "",
     /** True once the app has looked for a picture, so it does not keep asking. */
     val imageChecked: Boolean = false,
+    /** True once the article has been listened to the end. */
+    val finished: Boolean = false,
 ) {
     val percent: Int get() = if (sentences <= 1) 0 else (position * 100 / (sentences - 1)).coerceIn(0, 100)
 
@@ -36,6 +38,7 @@ data class LibraryEntry(
         setProperty("audioPositionMs", audioPositionMs.toString())
         setProperty("imageCredit", imageCredit)
         setProperty("imageChecked", imageChecked.toString())
+        setProperty("finished", finished.toString())
     }
 
     companion object {
@@ -56,6 +59,7 @@ data class LibraryEntry(
                 hasAudio = hasAudio,
                 imageCredit = p.getProperty("imageCredit") ?: "",
                 imageChecked = p.getProperty("imageChecked") == "true",
+                finished = p.getProperty("finished") == "true",
             )
         }
     }

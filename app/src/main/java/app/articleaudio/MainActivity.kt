@@ -99,6 +99,15 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.background
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.mutableStateListOf
 import java.text.DateFormat
 import java.util.Date
 
@@ -155,47 +164,112 @@ private fun AppTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = colors, content = content)
 }
 
-/** Which screen is showing. Kept outside the screens so turning the phone keeps it. */
+/**
+ * Which screen is showing. The first item is the tab (home, search or library); screens opened
+ * from it sit on top. Kept outside the screens so turning the phone keeps it.
+ */
 object Nav {
-    var screen by mutableStateOf("library")
+    private val TABS = listOf("home", "search", "library")
+    private val stack = mutableStateListOf("home")
+
+    /** The topic shown on the topic screen. */
+    var topic by mutableStateOf("" to "")
+
+    val tab: String get() = stack.first()
+    val canGoBack: Boolean get() = stack.size > 1 || stack.first() != "home"
+
+    /** Setting a tab shows that tab; setting any other screen opens it on top (or returns to it). */
+    var screen: String
+        get() = stack.last()
+        set(value) {
+            if (value in TABS) {
+                stack.clear()
+                stack.add(value)
+                return
+            }
+            val i = stack.indexOf(value)
+            if (i >= 0) {
+                while (stack.size > i + 1) stack.removeAt(stack.lastIndex)
+            } else {
+                stack.add(value)
+            }
+        }
+
+    fun back() {
+        when {
+            stack.size > 1 -> stack.removeAt(stack.lastIndex)
+            stack.first() != "home" -> screen = "home"
+        }
+    }
 }
 
 @Composable
 private fun App(onPlay: () -> Unit) {
-    val screen = Nav.screen
-    val back = {
-        Nav.screen = when (screen) {
-            "text", "changes" -> "player"
-            "log" -> "settings"
-            else -> "library"
-        }
-    }
-    if (screen != "library") BackHandler(onBack = back)
-    when (screen) {
+    BackHandler(enabled = Nav.canGoBack) { Nav.back() }
+    val back = { Nav.back() }
+    when (Nav.screen) {
         "player" -> PlayerScreen(onBack = back, onPlay = onPlay)
         "text" -> TextScreen(onBack = back, onPlay = onPlay)
         "changes" -> ChangesScreen(onBack = back)
         "settings" -> SettingsScreen(onBack = back)
-        "search" -> SearchScreen(onBack = back)
         "log" -> LogScreen(onBack = back)
-        else -> LibraryScreen(onPlay = onPlay)
+        "article" -> ArticleScreen(onBack = back)
+        "topic" -> TopicScreen(onBack = back)
+        else -> TabsScreen(onPlay)
     }
 }
+
+/** Home, Search and Library, with the mini player above the tab bar. */
+@Composable
+private fun TabsScreen(onPlay: () -> Unit) {
+    val article = Reader.article
+    Column(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.weight(1f)) {
+            when (Nav.tab) {
+                "search" -> SearchScreen()
+                "library" -> LibraryScreen()
+                else -> HomeScreen(onPlay)
+            }
+        }
+        if (article != null && Reader.entry != null) MiniPlayer(article, onPlay, aboveTabs = true)
+        NavigationBar {
+            for ((tab, label, icon) in listOf(
+                Triple("home", "Home", R.drawable.ic_home),
+                Triple("search", "Search", R.drawable.ic_search),
+                Triple("library", "Library", R.drawable.ic_library),
+            )) {
+                NavigationBarItem(
+                    selected = Nav.tab == tab,
+                    onClick = { Nav.screen = tab },
+                    icon = { AppIcon(icon, null) },
+                    label = { Text(label) },
+                )
+            }
+        }
+    }
+}
+
+/** Tab screens leave the bottom edge to the tab bar. */
+private val NoInsets = WindowInsets(0, 0, 0, 0)
 
 @Composable
 private fun AppIcon(id: Int, description: String?, modifier: Modifier = Modifier) {
     Icon(painterResource(id), contentDescription = description, modifier = modifier)
 }
 
-// ---- Library (home) ---------------------------------------------------------------------
+// ---- Home tab -----------------------------------------------------------------------------
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LibraryScreen(onPlay: () -> Unit) {
-    val entries = Library.entries
-    val open = Reader.entry
+private fun HomeScreen(onPlay: () -> Unit) {
+    LaunchedEffect(Unit) { HomeFeed.refresh() }
+    val featured = HomeFeed.featured
+    // The article to continue: the open one, or else the most recently opened unfinished one.
+    val open = Reader.entry?.let { e -> Library.entries.firstOrNull { it.id == e.id } }
+    val resume = open ?: Library.entries.firstOrNull { it.position > 0 && !it.finished }
 
     Scaffold(
+        contentWindowInsets = NoInsets,
         topBar = {
             TopAppBar(
                 title = { Text("Article Audio") },
@@ -204,40 +278,256 @@ private fun LibraryScreen(onPlay: () -> Unit) {
                 },
             )
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { Nav.screen = "search" },
-                icon = { AppIcon(R.drawable.ic_search, null) },
-                text = { Text("Find article") },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 8.dp),
+        ) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("Article of the Day", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(12.dp))
+                    when {
+                        featured != null -> FeaturedCard(featured)
+                        HomeFeed.loading -> CircularProgressIndicator(modifier = Modifier.padding(48.dp))
+                        else -> Text(
+                            HomeFeed.problem.ifEmpty { "Nothing to show yet." },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(32.dp),
+                        )
+                    }
+                }
+            }
+            item { HorizontalDivider(modifier = Modifier.padding(16.dp)) }
+            item {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    if (resume != null) {
+                        Column(modifier = Modifier.padding(start = 16.dp, end = 12.dp)) {
+                            Text("Continue listening", style = MaterialTheme.typography.titleSmall)
+                            Spacer(Modifier.height(8.dp))
+                            ContinueTile(resume, onPlay)
+                        }
+                        VerticalDivider(modifier = Modifier.height(180.dp))
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Suggested topics",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(start = if (resume != null) 12.dp else 16.dp),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = if (resume != null) 12.dp else 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(HomeFeed.TOPICS.size) { i -> TopicTile(i) }
+                        }
+                    }
+                }
+            }
+            item { HorizontalDivider(modifier = Modifier.padding(16.dp)) }
+            item {
+                Text(
+                    "Popular reads",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(start = 16.dp, bottom = 8.dp),
+                )
+                val popular = HomeFeed.popular
+                if (popular.isEmpty()) {
+                    Text(
+                        if (HomeFeed.loading) "Loading…" else "Nothing to show yet.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                } else {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(popular.size) { i -> ArticleTile(popular[i], 130.dp) }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+}
+
+/** A search result, a feed article or anything else with a title, as a picture. */
+@Composable
+private fun ResultPicture(result: WikipediaClient.SearchResult, size: androidx.compose.ui.unit.Dp) {
+    val saved = Library.entries.firstOrNull { it.title == result.title }
+    val url = result.thumbnail
+    when {
+        url != null -> ArticlePicture({ Pictures.fromUrl(url) }, url, size)
+        saved != null -> EntryPicture(saved, size)
+        else -> ArticlePicture({ null }, result.title, size)
+    }
+}
+
+private fun openArticlePage(result: WikipediaClient.SearchResult) {
+    Reader.openPreview(result.title, result.description, result.thumbnail)
+    Nav.screen = "article"
+}
+
+@Composable
+private fun FeaturedCard(result: WikipediaClient.SearchResult) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth(0.75f)
+            .clip(MaterialTheme.shapes.large)
+            .clickable { openArticlePage(result) },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) { ResultPicture(result, maxWidth) }
+        Text(
+            result.title,
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        if (result.description.isNotEmpty()) {
+            Text(
+                result.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** A square article card with its title underneath, for the Home rows. */
+@Composable
+private fun ArticleTile(result: WikipediaClient.SearchResult, size: androidx.compose.ui.unit.Dp) {
+    Column(modifier = Modifier.width(size).clip(MaterialTheme.shapes.medium).clickable { openArticlePage(result) }) {
+        ResultPicture(result, size)
+        Text(
+            result.title,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
+/** The article to carry on with: tap to open the player and keep playing. */
+@Composable
+private fun ContinueTile(entry: LibraryEntry, onPlay: () -> Unit) {
+    Column(
+        modifier = Modifier.width(110.dp).clip(MaterialTheme.shapes.medium).clickable {
+            if (Reader.entry?.id == entry.id) {
+                if (!Reader.playing) onPlay()
+            } else {
+                Reader.openAndPlay(entry.id)
+            }
+            Nav.screen = "player"
+        },
+    ) {
+        EntryPicture(entry, 110.dp)
+        LinearProgressIndicator(
+            progress = { entry.percent / 100f },
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        )
+        Text(
+            entry.name,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+/** A coloured square with a topic's name. Tap to see articles about it. */
+@Composable
+private fun TopicTile(i: Int) {
+    val (label, query) = HomeFeed.TOPICS[i]
+    val colors = listOf(
+        MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer,
+        MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer,
+        MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer,
+    )
+    val (background, foreground) = colors[i % colors.size]
+    Box(
+        modifier = Modifier
+            .size(110.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(background)
+            .clickable {
+                Nav.topic = label to query
+                Nav.screen = "topic"
+            }
+            .padding(10.dp),
+        contentAlignment = Alignment.BottomStart,
+    ) {
+        Text(label, style = MaterialTheme.typography.titleSmall, color = foreground)
+    }
+}
+
+// ---- Library tab --------------------------------------------------------------------------
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LibraryScreen() {
+    var filter by rememberSaveable { mutableStateOf("all") }
+    val entries = Library.entries.filter {
+        when (filter) {
+            "progress" -> it.position > 0
+            "finished" -> it.finished
+            "downloaded" -> it.hasAudio
+            else -> true
+        }
+    }
+
+    Scaffold(
+        contentWindowInsets = NoInsets,
+        topBar = {
+            TopAppBar(
+                title = { Text("Library") },
+                actions = {
+                    IconButton(onClick = { Nav.screen = "settings" }) { AppIcon(R.drawable.ic_settings, "Settings") }
+                },
             )
         },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.padding(padding).fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (Reader.loading || (Reader.message.isNotEmpty() && Reader.messageIsError)) {
                 item { StatusLine() }
             }
-            if (open != null && Reader.article != null) {
-                item { ContinueCard(open, onPlay) }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val filters = listOf("all" to "All", "progress" to "In progress", "finished" to "Finished", "downloaded" to "Downloaded")
+                    items(filters.size) { i ->
+                        val (key, label) = filters[i]
+                        FilterChip(selected = filter == key, onClick = { filter = key }, label = { Text(label) })
+                    }
+                }
             }
-            if (entries.isEmpty()) {
+            if (Library.entries.isEmpty()) {
                 item { EmptyLibrary() }
-            } else {
+            } else if (entries.isEmpty()) {
                 item {
                     Text(
-                        "Library",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(top = 8.dp),
+                        "Nothing here yet.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp),
                     )
                 }
+            } else {
                 items(entries.size, key = { entries[it].id }) { i -> LibraryCard(entries[i]) }
             }
         }
     }
-
 }
 
 /** Fetching progress, or the last error. */
@@ -263,60 +553,12 @@ private fun EmptyLibrary() {
     ) {
         Text("Nothing here yet", style = MaterialTheme.typography.titleLarge)
         Text(
-            "Tap Find article and search for any Wikipedia article, or share one to Article Audio " +
-                "from the Wikipedia app or your browser. Everything you open is saved here and works without internet.",
+            "Find an article on Home or Search and press Play or Download, or share one to Article Audio " +
+                "from the Wikipedia app or your browser. Articles here work without internet.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-    }
-}
-
-/** The article that is open, with a play button, at the top of the library. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ContinueCard(entry: LibraryEntry, onPlay: () -> Unit) {
-    val saved = Library.entries.firstOrNull { it.id == entry.id } ?: entry
-    val article = Reader.article ?: return
-    val fraction = if (Reader.audioMode) Reader.audioPositionMs.toFloat() / maxOf(1, Reader.audioDurationMs)
-    else article.startChars[Reader.index.coerceIn(0, article.sentences.size - 1)].toFloat() / maxOf(1, article.totalChars)
-
-    ElevatedCard(
-        onClick = { Nav.screen = "player" },
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            EntryPicture(saved, 56.dp)
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    if (Reader.playing) "Now playing" else "Continue listening",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-                Text(
-                    saved.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                LinearProgressIndicator(progress = { fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-            }
-            FilledIconButton(
-                onClick = { if (Reader.playing) Reader.pause() else onPlay() },
-                modifier = Modifier.size(56.dp),
-            ) {
-                AppIcon(
-                    if (Reader.playing) R.drawable.ic_pause else R.drawable.ic_play,
-                    if (Reader.playing) "Pause" else "Play",
-                )
-            }
-        }
     }
 }
 
@@ -345,9 +587,9 @@ private fun LibraryCard(entry: LibraryEntry) {
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 val progress = when {
-                    entry.position == 0 -> "Not started"
-                    entry.percent >= 100 -> "Finished"
-                    else -> "${entry.percent}%"
+                    entry.position > 0 -> "${entry.percent}%"
+                    entry.finished -> "Finished"
+                    else -> "Not started"
                 }
                 Text(
                     "$progress · ${maxOf(1, entry.chars / 900)} min · ${day(entry.fetchedAt)}",
@@ -406,7 +648,7 @@ private fun day(time: Long): String = DateFormat.getDateInstance(DateFormat.MEDI
 /** Search Wikipedia as you type; tap a result to fetch it and open the player. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SearchScreen(onBack: () -> Unit) {
+private fun SearchScreen() {
     var query by rememberSaveable { mutableStateOf("") }
     var results by remember { mutableStateOf<List<WikipediaClient.SearchResult>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
@@ -445,10 +687,10 @@ private fun SearchScreen(onBack: () -> Unit) {
     }
 
     Scaffold(
+        contentWindowInsets = NoInsets,
         topBar = {
             TopAppBar(
-                title = { Text("Find article") },
-                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
+                title = { Text("Search") },
                 actions = { TextButton(onClick = { pasting = true }) { Text("Paste link") } },
             )
         },
@@ -486,46 +728,183 @@ private fun SearchScreen(onBack: () -> Unit) {
                     Text(problem, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp))
                 }
             }
-            items(results.size, key = { results[it].title }) { i ->
-                val result = results[i]
-                val saved = Library.entries.firstOrNull { it.title == result.title }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.medium)
-                        .clickable {
-                            if (saved != null) Reader.open(saved.id) else Reader.fetchByTitle(result.title)
-                            Nav.screen = "player"
-                        }
-                        .padding(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val url = result.thumbnail
-                    if (url != null) ArticlePicture({ Pictures.fromUrl(url) }, url, 48.dp)
-                    else ArticlePicture({ null }, result.title, 48.dp)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(result.title, style = MaterialTheme.typography.bodyLarge)
-                        val note = listOfNotNull(
-                            result.description.ifEmpty { null },
-                            if (saved != null) "in your library" else null,
-                        ).joinToString(" · ")
-                        if (note.isNotEmpty()) {
-                            Text(
-                                note,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-            }
+            items(results.size, key = { results[it].title }) { i -> ResultRow(results[i]) }
         }
     }
 
     if (pasting) AddArticleDialog(onDismiss = { pasting = false })
+}
+
+/** One search or topic result: picture, title and description. Tap to open the article page. */
+@Composable
+private fun ResultRow(result: WikipediaClient.SearchResult) {
+    val saved = Library.entries.firstOrNull { it.title == result.title }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable { openArticlePage(result) }
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ResultPicture(result, 48.dp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(result.title, style = MaterialTheme.typography.bodyLarge)
+            val note = listOfNotNull(
+                result.description.ifEmpty { null },
+                if (saved != null) "in your library" else null,
+            ).joinToString(" · ")
+            if (note.isNotEmpty()) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Articles about one of the Home topics, from Wikipedia's full-text search. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TopicScreen(onBack: () -> Unit) {
+    val (label, query) = Nav.topic
+    var results by remember(query) { mutableStateOf<List<WikipediaClient.SearchResult>>(emptyList()) }
+    var loading by remember(query) { mutableStateOf(true) }
+    var problem by remember(query) { mutableStateOf("") }
+    LaunchedEffect(query) {
+        try {
+            results = withContext(Dispatchers.IO) { WikipediaClient.searchTopic(query) }
+            if (results.isEmpty()) problem = "No articles found."
+        } catch (t: Throwable) {
+            DebugLog.e("Topic \"$label\" failed to load", t)
+            problem = "Could not load articles. Check the internet connection."
+        }
+        loading = false
+    }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(label) },
+                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (loading) item { CircularProgressIndicator(modifier = Modifier.padding(24.dp)) }
+            if (problem.isNotEmpty()) item { Text(problem, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            items(results.size, key = { results[it].title }) { i -> ResultRow(results[i]) }
+        }
+    }
+}
+
+/** An article's own page, before choosing to play it: picture, details and an opening preview. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ArticleScreen(onBack: () -> Unit) {
+    val preview = Reader.preview
+    val context = LocalContext.current
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {},
+                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
+            )
+        },
+    ) { padding ->
+        if (preview == null) {
+            Text("No article.", modifier = Modifier.padding(padding).padding(24.dp))
+            return@Scaffold
+        }
+        val article = preview.article
+        val saved = Library.entries.firstOrNull { it.title == (article?.title ?: preview.title) }
+        Column(
+            modifier = Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                ResultPicture(WikipediaClient.SearchResult(preview.title, preview.description, preview.thumbnail), 112.dp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(article?.title ?: preview.title, style = MaterialTheme.typography.headlineSmall)
+                    if (preview.description.isNotEmpty()) {
+                        Text(
+                            preview.description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            when {
+                preview.loading -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("Loading the article…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                preview.error.isNotEmpty() -> Text(preview.error, color = MaterialTheme.colorScheme.error)
+                article != null -> {
+                    val minutes = maxOf(1, (article.totalChars / (Reader.CHARS_PER_SECOND * Reader.speed) / 60).toInt())
+                    val words = preview.text.split(Regex("\\s+")).count { it.isNotBlank() }
+                    val facts = listOfNotNull(
+                        "About $minutes min at ${trimSpeed(Reader.speed)}×",
+                        "${article.sections.size - 1} sections",
+                        "%,d words".format(words),
+                        saved?.let {
+                            when {
+                                it.position > 0 -> "${it.percent}% listened"
+                                it.finished -> "Finished"
+                                else -> "In your library"
+                            }
+                        },
+                        if (saved?.hasAudio == true) "Audio downloaded" else null,
+                    )
+                    Text(facts.joinToString(" · "), style = MaterialTheme.typography.bodyMedium)
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = {
+                            Reader.startPreview(download = false)
+                            Nav.screen = "player"
+                        }) {
+                            AppIcon(R.drawable.ic_play, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (saved != null && saved.position > 0) "Continue" else "Play")
+                        }
+                        if (Exporter.running && Exporter.title == article.title) {
+                            Text("Making audio: ${(Exporter.progress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                        } else if (saved?.hasAudio != true) {
+                            OutlinedButton(onClick = { Reader.startPreview(download = true) }, enabled = !Exporter.running) {
+                                AppIcon(R.drawable.ic_download, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Download")
+                            }
+                        }
+                    }
+                    TextButton(onClick = { openOriginal(context, article.title) }) { Text("Open on Wikipedia") }
+
+                    val opening = article.chunks.firstOrNull { !it.isHeading }?.text
+                    if (opening != null) {
+                        Text(
+                            opening,
+                            style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Serif, lineHeight = 28.sp),
+                        )
+                    }
+                    Text(
+                        "Text from Wikipedia, licensed CC BY-SA 4.0.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 24.dp),
+                    )
+                }
+            }
+        }
+    }
 }
 
 // ---- Player -----------------------------------------------------------------------------
@@ -565,6 +944,7 @@ private fun PlayerScreen(onBack: () -> Unit, onPlay: () -> Unit) {
                                     text = { Text("Refresh from Wikipedia") },
                                     onClick = { menu = false; Reader.refresh() },
                                 )
+                                DropdownMenuItem(text = { Text("Restart from the beginning") }, onClick = { menu = false; Reader.stop() })
                                 DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; deleting = true })
                             }
                         }
@@ -708,6 +1088,7 @@ private fun PlayerBody(article: Article, saved: LibraryEntry, onPlay: () -> Unit
 
         var sleepMenu by remember { mutableStateOf(false) }
         var sectionsOpen by remember { mutableStateOf(false) }
+        var backgroundOpen by remember { mutableStateOf(false) }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -718,7 +1099,17 @@ private fun PlayerBody(article: Article, saved: LibraryEntry, onPlay: () -> Unit
             }
             TextButton(onClick = { sleepMenu = true }) { Text(sleepLabel()) }
             TextButton(onClick = { sectionsOpen = true }) { Text("Sections") }
-            TextButton(onClick = { Reader.stop() }) { Text("Restart") }
+            TextButton(onClick = { backgroundOpen = true }) {
+                Text(Noise.KINDS.firstOrNull { it.first == Ambient.kind }?.second?.let { if (Ambient.kind == "off") "Sound" else it } ?: "Sound")
+            }
+        }
+        if (backgroundOpen) {
+            AlertDialog(
+                onDismissRequest = { backgroundOpen = false },
+                title = { Text("Background sound") },
+                text = { Column { BackgroundSoundSettings() } },
+                confirmButton = { TextButton(onClick = { backgroundOpen = false }) { Text("Done") } },
+            )
         }
         if (sleepMenu) SleepDialog(onDone = { sleepMenu = false })
         if (sectionsOpen) SectionsDialog(article, onDone = { sectionsOpen = false })
@@ -961,12 +1352,12 @@ private fun SectionsDialog(article: Article, onDone: () -> Unit) {
 
 /** A compact player along the bottom of the Full text screen. Tap the title to open the full player. */
 @Composable
-private fun MiniPlayer(article: Article, onPlay: () -> Unit) {
+private fun MiniPlayer(article: Article, onPlay: () -> Unit, aboveTabs: Boolean = false) {
     val fraction = if (Reader.audioMode) Reader.audioPositionMs.toFloat() / maxOf(1, Reader.audioDurationMs)
     else article.startChars[Reader.index.coerceIn(0, article.sentences.size - 1)].toFloat() / maxOf(1, article.totalChars)
     val name = Reader.entry?.let { e -> Library.entries.firstOrNull { it.id == e.id }?.name } ?: article.title
     Surface(tonalElevation = 3.dp, shadowElevation = 6.dp) {
-        Column(modifier = Modifier.navigationBarsPadding()) {
+        Column(modifier = if (aboveTabs) Modifier else Modifier.navigationBarsPadding()) {
             LinearProgressIndicator(progress = { fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),

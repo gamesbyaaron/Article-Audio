@@ -68,6 +68,20 @@ object Reader : Speaker.Listener {
     var sleepEndsAt by mutableLongStateOf(0L)
         private set
 
+    /**
+     * An article looked at on its own page before deciding to play it. Its text is fetched so
+     * its length can be shown; it joins the library only when played or downloaded.
+     */
+    class Preview(val title: String, val description: String, val thumbnail: String?) {
+        var article by mutableStateOf<Article?>(null)
+        var text = ""
+        var loading by mutableStateOf(true)
+        var error by mutableStateOf("")
+    }
+
+    var preview by mutableStateOf<Preview?>(null)
+        private set
+
     /** Called whenever playing or active changes, so the playback service can update. */
     var onPlaybackChanged: (() -> Unit)? = null
 
@@ -180,6 +194,7 @@ object Reader : Speaker.Listener {
     }
 
     private var lastSave = 0L
+    private var playWhenOpened = false
 
     /** While the downloaded audio plays, keeps the progress bar and the saved place up to date. */
     private val tick = object : Runnable {
@@ -325,6 +340,7 @@ object Reader : Speaker.Listener {
             } catch (t: Throwable) {
                 DebugLog.e("Opening library entry $id failed", t)
                 main.post {
+                    playWhenOpened = false
                     loading = false
                     show("Could not open the article: ${t.message ?: t.javaClass.simpleName}", error = true)
                 }
@@ -354,6 +370,69 @@ object Reader : Speaker.Listener {
         }
     }
 
+    /** Shows an article's page: its details come from the library if saved, otherwise from Wikipedia. */
+    fun openPreview(title: String, description: String, thumbnail: String?) {
+        val p = Preview(title, description, thumbnail)
+        preview = p
+        val maxChars = maxChunk()
+        val saved = Library.entries.firstOrNull { it.title == title }
+        thread(name = "preview") {
+            try {
+                val (realTitle, text) = if (saved != null) saved.title to Library.text(saved.id)
+                else WikipediaClient.fetchPlainText(title).let { it.title to it.text }
+                val built = ArticleText.build(realTitle, text, maxChars)
+                main.post {
+                    p.text = text
+                    p.article = built
+                    p.loading = false
+                }
+            } catch (t: Throwable) {
+                DebugLog.e("Could not load \"$title\" for its page", t)
+                main.post {
+                    p.loading = false
+                    p.error = "Could not load the article: ${t.message ?: t.javaClass.simpleName}"
+                }
+            }
+        }
+    }
+
+    /** Saves the previewed article to the library, then plays it or makes its audio file. */
+    fun startPreview(download: Boolean) {
+        val p = preview ?: return
+        val a = p.article ?: return
+        val open = entry
+        if (!download && open != null && open.title == a.title && article != null) {
+            if (!playing) play()
+            return
+        }
+        thread(name = "save") {
+            val saved = Library.find(Wav.fileName(a.title))
+                ?: Library.save(a.title, p.text, a.sentences.size, resetPosition = false)
+            if (!saved.imageChecked) thread(name = "picture") { fetchPicture(saved) }
+            main.post {
+                if (download) {
+                    DebugLog.i("Saved \"${a.title}\" to the library to download it")
+                    Exporter.start(a)
+                } else {
+                    leave()
+                    display(a, saved)
+                    DebugLog.i("Playing \"${a.title}\" from its page at sentence ${index + 1}")
+                    play()
+                }
+            }
+        }
+    }
+
+    /** Opens a library article and starts playing where it was left. */
+    fun openAndPlay(id: String) {
+        if (entry?.id == id && article != null) {
+            if (!playing) play()
+            return
+        }
+        playWhenOpened = true
+        open(id)
+    }
+
     /** Closes the open article, for example after it is deleted. */
     fun close() {
         leave()
@@ -372,6 +451,10 @@ object Reader : Speaker.Listener {
         loading = false
         show("")
         Library.markOpened(saved.id)
+        if (playWhenOpened) {
+            playWhenOpened = false
+            play()
+        }
     }
 
     /** Stops playing and saves the place, before switching to another article. */
@@ -483,6 +566,7 @@ object Reader : Speaker.Listener {
         }
         focus.abandon()
         savePosition(force = true)
+        entry?.let { Library.markFinished(it.id) }
         if (sleepMode.isNotEmpty()) clearSleep()
         DebugLog.i("Finished \"$name\"")
         notifyChanged()

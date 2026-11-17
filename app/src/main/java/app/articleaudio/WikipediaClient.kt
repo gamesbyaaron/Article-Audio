@@ -41,6 +41,67 @@ object WikipediaClient {
         return results.sortedBy { it.first }.map { it.second }
     }
 
+    /**
+     * Today's featured article and most-read titles from Wikipedia's daily feed, for a UTC day
+     * written "2026/11/17". Null if that day's feed is not there yet. Tries the feed's address
+     * on Wikipedia first and Wikimedia's API address second.
+     */
+    fun fetchFeed(day: String): Pair<String?, List<String>>? {
+        val addresses = listOf(
+            "https://en.wikipedia.org/api/rest_v1/feed/featured/$day",
+            "https://api.wikimedia.org/feed/v1/wikipedia/en/featured/$day",
+        )
+        for (address in addresses) {
+            val json = try {
+                getJson(address)
+            } catch (t: Throwable) {
+                DebugLog.e("Feed not available at $address: ${t.message}")
+                continue
+            }
+            fun title(o: JSONObject): String? =
+                o.optJSONObject("titles")?.optString("normalized")?.ifEmpty { null }
+                    ?: o.optString("title").ifEmpty { null }?.replace('_', ' ')
+            val tfa = json.optJSONObject("tfa")?.let { title(it) }
+            val articles = json.optJSONObject("mostread")?.optJSONArray("articles")
+            val mostRead = (0 until (articles?.length() ?: 0)).mapNotNull { articles!!.optJSONObject(it)?.let { o -> title(o) } }
+            if (tfa == null && mostRead.isEmpty()) continue
+            return tfa to mostRead
+        }
+        return null
+    }
+
+    /** Short descriptions and free-licensed thumbnails for several titles at once. */
+    fun details(titles: List<String>): Map<String, SearchResult> {
+        if (titles.isEmpty()) return emptyMap()
+        val json = getJson(
+            "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1" +
+                "&prop=pageimages|description&piprop=thumbnail&pithumbsize=320&pilicense=free" +
+                "&titles=" + URLEncoder.encode(titles.take(50).joinToString("|"), "UTF-8")
+        )
+        val query = json.optJSONObject("query") ?: return emptyMap()
+        // Map each asked-for title through any normalising or redirect to the page that answered.
+        val renamed = mutableMapOf<String, String>()
+        for (key in listOf("normalized", "redirects")) {
+            val list = query.optJSONArray(key) ?: continue
+            for (i in 0 until list.length()) {
+                val o = list.getJSONObject(i)
+                renamed[o.optString("from")] = o.optString("to")
+            }
+        }
+        val pages = query.optJSONArray("pages") ?: return emptyMap()
+        val byTitle = (0 until pages.length()).map { pages.getJSONObject(it) }.associateBy { it.optString("title") }
+        return titles.mapNotNull { asked ->
+            var t = asked
+            repeat(2) { renamed[t]?.let { t = it } }
+            val page = byTitle[t] ?: return@mapNotNull null
+            asked to SearchResult(
+                title = page.optString("title"),
+                description = page.optString("description"),
+                thumbnail = page.optJSONObject("thumbnail")?.optString("source")?.ifEmpty { null },
+            )
+        }.toMap()
+    }
+
     /** Articles about a topic, most relevant first, from Wikipedia's full-text search. */
     fun searchTopic(query: String): List<SearchResult> {
         val json = getJson(
