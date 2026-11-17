@@ -199,6 +199,7 @@ Owner installed step 4a (build 9); detailed feedback still to come. Owner's deci
 Player and voice names (owner's requests, 17 November 2026): built, waiting for the owner to test.
 - Home screen player: a draggable progress bar over the whole article with elapsed and total time, −15s and +15s buttons (also used by the lock-screen back/next), Play/Pause, and a speed button that steps through 0.75× to 2.5×. Times are estimates from text length (Reader.CHARS_PER_SECOND = 15 at 1×), because live reading has no audio file; jumps land on the start of a sentence.
 - Voices are listed as "English (United States) · Voice 3 · male" (VoiceNames.kt). Android does not report gender, so male/female comes from a table of Google voice codes written from memory; it may be wrong and is omitted for unknown voices.
+Pinned for later, not in the development order (owner, 17 November 2026): finding articles inside the app (search, featured, most-read, random) on top of the saved library, and possibly releasing the app to others (name and icon without "Wikipedia", private signing key, attribution and Wikimedia API terms, Google Play). Do not start any of this until the owner asks.
 Next:
 - 4b: download an article as an .m4a audio file (uses the same foreground service as 4a).
 - 4c: library (saved articles, resume position, rename, delete) and attribution.
