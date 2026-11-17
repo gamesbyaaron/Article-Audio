@@ -16,6 +16,7 @@ class ArticleAudioApp : Application() {
         }
 
         Prefs.init(this)
+        Library.init(this)
         Reader.init(this)
         Exporter.init(this)
 

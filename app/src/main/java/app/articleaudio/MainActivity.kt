@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,6 +66,8 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.text.DateFormat
+import java.util.Date
 
 class MainActivity : ComponentActivity() {
     private val askForNotifications =
@@ -189,36 +192,98 @@ private fun HomeScreen(onOpen: (String) -> Unit, onPlay: () -> Unit) {
             }
 
             val article = Reader.article
-            if (article != null) ArticlePlayer(article, onOpen, onPlay)
+            val entry = Reader.entry
+            if (article != null && entry != null) ArticlePlayer(article, entry, onOpen, onPlay)
+
+            LibraryList()
         }
     }
 }
 
+/** Saved articles, most recently opened first. Tap one to open it where it was left. */
 @Composable
-private fun ArticlePlayer(article: Article, onOpen: (String) -> Unit, onPlay: () -> Unit) {
+private fun LibraryList() {
+    val entries = Library.entries
+    Text("Library", style = MaterialTheme.typography.titleMedium)
+    if (entries.isEmpty()) {
+        Text(
+            "Articles you fetch are saved here and can be opened without internet.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    for (entry in entries) {
+        val open = Reader.entry?.id == entry.id
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = !Reader.loading) { Reader.open(entry.id) }
+                .padding(vertical = 6.dp),
+        ) {
+            Text(
+                entry.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (open) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+            val progress = if (entry.position == 0) "Not started" else "${entry.percent}% read"
+            val audio = if (entry.hasAudio) " · audio downloaded" else ""
+            Text(
+                "$progress · about ${maxOf(1, entry.chars / 900)} min · fetched ${day(entry.fetchedAt)}$audio",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun day(time: Long): String = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(time))
+
+@Composable
+private fun ArticlePlayer(article: Article, entry: LibraryEntry, onOpen: (String) -> Unit, onPlay: () -> Unit) {
     val index = Reader.index.coerceIn(0, article.sentences.size - 1)
     val current = article.sentences[index]
     val speed = Reader.speed
-    // There is no audio file behind live reading, so times are worked out from the text length.
-    val charsPerSecond = Reader.CHARS_PER_SECOND * speed
-    val total = maxOf(1, article.totalChars)
-    val elapsedSeconds = (article.startChars[index] / charsPerSecond).toInt()
-    val totalSeconds = (total / charsPerSecond).toInt()
+    val audio = Reader.audioMode
+    // The library list has the up-to-date name and whether a download exists.
+    val saved = Library.entries.firstOrNull { it.id == entry.id } ?: entry
     var dragging by remember { mutableStateOf<Float?>(null) }
+
+    // Live reading has no audio file behind it, so its times are worked out from the text
+    // length. A downloaded file has exact times.
+    val charsPerSecond = Reader.CHARS_PER_SECOND * speed
+    val totalChars = maxOf(1, article.totalChars)
+    val totalSeconds = if (audio) Reader.audioDurationMs / 1000 else (totalChars / charsPerSecond).toInt()
+    val elapsedSeconds = if (audio) Reader.audioPositionMs / 1000 else (article.startChars[index] / charsPerSecond).toInt()
+    val fraction = if (audio) Reader.audioPositionMs.toFloat() / maxOf(1, Reader.audioDurationMs)
+    else article.startChars[index].toFloat() / totalChars
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(article.title, style = MaterialTheme.typography.titleLarge)
-            Text(
-                current.text,
-                style = if (current.isHeading) MaterialTheme.typography.titleMedium
-                else MaterialTheme.typography.bodyLarge,
-            )
+            Text(saved.name, style = MaterialTheme.typography.titleLarge)
+            if (saved.hasAudio) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (audio) {
+                        OutlinedButton(onClick = { Reader.useAudio(false) }) { Text("Read live") }
+                        Button(onClick = {}) { Text("Play download") }
+                    } else {
+                        Button(onClick = {}) { Text("Read live") }
+                        OutlinedButton(onClick = { Reader.useAudio(true) }) { Text("Play download") }
+                    }
+                }
+            }
+            if (audio) {
+                Text("Playing the downloaded audio file.", style = MaterialTheme.typography.bodyLarge)
+            } else {
+                Text(
+                    current.text,
+                    style = if (current.isHeading) MaterialTheme.typography.titleMedium
+                    else MaterialTheme.typography.bodyLarge,
+                )
+            }
             Slider(
-                value = dragging ?: (article.startChars[index].toFloat() / total),
+                value = (dragging ?: fraction).coerceIn(0f, 1f),
                 onValueChange = { dragging = it },
                 onValueChangeFinished = {
                     dragging?.let { Reader.seekTo(it) }
@@ -230,7 +295,10 @@ private fun ArticlePlayer(article: Article, onOpen: (String) -> Unit, onPlay: ()
                     clock(dragging?.let { (it * totalSeconds).toInt() } ?: elapsedSeconds),
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Text("about ${clock(totalSeconds)}", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    if (audio) clock(totalSeconds) else "about ${clock(totalSeconds)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -249,7 +317,72 @@ private fun ArticlePlayer(article: Article, onOpen: (String) -> Unit, onPlay: ()
             }
             TextButton(onClick = { Reader.stop() }) { Text("Stop and go to start") }
             DownloadSection(article)
+            ArticleOptions(saved)
         }
+    }
+}
+
+/** Where the text came from, and rename, refresh and delete for the open article. */
+@Composable
+private fun ArticleOptions(entry: LibraryEntry) {
+    val context = LocalContext.current
+    var renaming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    var newName by remember(entry.id) { mutableStateOf(entry.name) }
+
+    Text(
+        "Text from the Wikipedia article \"${entry.title}\", licensed CC BY-SA 4.0. " +
+            "Adapted for listening. Fetched ${day(entry.fetchedAt)}.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        TextButton(onClick = {
+            val url = "https://en.wikipedia.org/wiki/" + Uri.encode(entry.title.replace(' ', '_'))
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            } catch (t: Throwable) {
+                DebugLog.e("Could not open the original article", t)
+            }
+        }) { Text("Original") }
+        TextButton(onClick = { newName = entry.name; renaming = true }) { Text("Rename") }
+        TextButton(onClick = { Reader.refresh() }, enabled = !Reader.loading) { Text("Refresh") }
+        TextButton(onClick = { deleting = true }) { Text("Delete") }
+    }
+
+    if (renaming) {
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            title = { Text("Rename") },
+            text = { OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true) },
+            confirmButton = {
+                TextButton(onClick = {
+                    Library.rename(entry.id, newName)
+                    renaming = false
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
+        )
+    }
+    if (deleting) {
+        AlertDialog(
+            onDismissRequest = { deleting = false },
+            title = { Text("Delete \"${entry.name}\"?") },
+            text = {
+                Text(
+                    "This removes the article, your place in it and its downloaded audio from the app. " +
+                        "A copy of the audio in your Music folder is not touched."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleting = false
+                    Reader.close()
+                    Library.delete(entry.id)
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } },
+        )
     }
 }
 

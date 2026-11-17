@@ -180,6 +180,7 @@ object Exporter {
             savedAs = saved
             savedUri = uri
             error = problem
+            Library.reload()
             onChanged?.invoke()
         }
     }
