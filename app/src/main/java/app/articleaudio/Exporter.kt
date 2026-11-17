@@ -109,6 +109,7 @@ object Exporter {
             val totalChars = pieces.sumOf { it.first.length }.coerceAtLeast(1)
             var doneChars = 0
             val buffer = ByteArray(32_768)
+            val sectionTimes = mutableMapOf<Int, Long>()
 
             for ((i, piece) in pieces.withIndex()) {
                 if (cancelled) throw Cancelled()
@@ -125,6 +126,7 @@ object Exporter {
                         DebugLog.i("Download sound format: ${info.sampleRate} Hz, ${info.channels} channel(s), 16-bit")
                     }
                     if (i == 0) w.silence(PARAGRAPH_PAUSE_MS)
+                    if (isHeading && i < article.chunks.size) sectionTimes[article.chunks[i].firstSentence] = w.millis
                     while (true) {
                         val count = readFully(input, buffer)
                         if (count <= 0) break
@@ -150,6 +152,7 @@ object Exporter {
             writer = null
             target.delete()
             if (!part.renameTo(target)) throw IOException("Could not save the finished file")
+            File(downloads, "$name.sections").writeText(SectionTimes.format(sectionTimes))
 
             val uri = publish(target, name, article.title)
             val took = (System.currentTimeMillis() - started) / 1000

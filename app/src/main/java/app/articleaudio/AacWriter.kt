@@ -29,6 +29,9 @@ class AacWriter(file: File, private val sampleRate: Int, private val channels: I
         codec.start()
     }
 
+    /** Milliseconds of sound written so far. */
+    val millis: Long get() = framesWritten * 1000 / sampleRate
+
     /** Seconds of sound written so far. */
     val seconds: Long get() = framesWritten / sampleRate
 

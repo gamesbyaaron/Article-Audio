@@ -8,6 +8,7 @@ import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlin.concurrent.thread
@@ -60,6 +61,13 @@ object Reader : Speaker.Listener {
     var audioDurationMs by mutableIntStateOf(0)
         private set
 
+    /** Sleep timer: "" (off), "time", "section" or "article". */
+    var sleepMode by mutableStateOf("")
+        private set
+    /** When a "time" sleep timer runs out, as System.currentTimeMillis(). */
+    var sleepEndsAt by mutableLongStateOf(0L)
+        private set
+
     /** Called whenever playing or active changes, so the playback service can update. */
     var onPlaybackChanged: (() -> Unit)? = null
 
@@ -69,6 +77,108 @@ object Reader : Speaker.Listener {
     private val main = Handler(Looper.getMainLooper())
     private var resumeWhenFocusReturns = false
     private var media: MediaPlayer? = null
+    private var sectionTimes: Map<Int, Long> = emptyMap()
+    private var sleepSectionEnd = -1 // sentence that ends a "section" timer
+    private var sleepSectionEndMs = -1 // or its time in the audio file
+    private var stopAtNextSentence = -1 // a timed sleep stops when this sentence is finished
+    private var fadeStep = -1 // counts down while the audio file fades out
+
+    private val sleepTick = object : Runnable {
+        override fun run() {
+            if (sleepMode.isEmpty()) return
+            if (sleepMode == "time" && System.currentTimeMillis() >= sleepEndsAt) {
+                sleepTimeUp()
+                return
+            }
+            if (sleepMode == "section" && playing) {
+                val reached = if (audioMode) sleepSectionEndMs in 0..audioPositionMs
+                else sleepSectionEnd in 0..index
+                if (reached) {
+                    DebugLog.i("Sleep timer: end of section reached")
+                    clearSleep()
+                    pause()
+                    return
+                }
+            }
+            main.postDelayed(this, 500)
+        }
+    }
+
+    private val fadeTick = object : Runnable {
+        override fun run() {
+            val player = media ?: return
+            if (fadeStep <= 0) {
+                fadeStep = -1
+                pause()
+                try { player.setVolume(1f, 1f) } catch (t: Throwable) { /* released */ }
+                return
+            }
+            val level = fadeStep / 20f
+            try { player.setVolume(level, level) } catch (t: Throwable) { /* released */ }
+            fadeStep--
+            main.postDelayed(this, 300)
+        }
+    }
+
+    /** Starts a sleep timer: [mode] "time" with [minutes], "section" or "article". */
+    fun setSleep(mode: String, minutes: Int = 0) {
+        clearSleep()
+        sleepMode = mode
+        when (mode) {
+            "time" -> sleepEndsAt = System.currentTimeMillis() + minutes * 60_000L
+            "section" -> {
+                val a = article ?: return
+                val next = a.sections.getOrNull(a.sectionAt(index) + 1)
+                sleepSectionEnd = next?.sentence ?: -1
+                sleepSectionEndMs = if (next != null) SectionTimes.startMs(a, next.sentence, sectionTimes, audioDurationMs) else -1
+            }
+        }
+        DebugLog.i("Sleep timer set: $mode" + if (mode == "time") " $minutes min" else "")
+        main.post(sleepTick)
+    }
+
+    fun clearSleep() {
+        main.removeCallbacks(sleepTick)
+        main.removeCallbacks(fadeTick)
+        if (fadeStep >= 0) try { media?.setVolume(1f, 1f) } catch (t: Throwable) { /* released */ }
+        fadeStep = -1
+        sleepMode = ""
+        sleepEndsAt = 0L
+        sleepSectionEnd = -1
+        sleepSectionEndMs = -1
+        stopAtNextSentence = -1
+    }
+
+    /** A timed sleep ran out: fade the audio file, or let live reading finish its sentence. */
+    private fun sleepTimeUp() {
+        DebugLog.i("Sleep timer: time is up")
+        sleepMode = ""
+        if (!playing) return
+        Ambient.fadeOut()
+        if (audioMode) {
+            fadeStep = 20
+            main.post(fadeTick)
+        } else {
+            stopAtNextSentence = index
+        }
+    }
+
+    /** Jumps to a section of the article, live or in the downloaded audio. */
+    fun jumpToSection(section: ArticleSection) {
+        val a = article ?: return
+        DebugLog.i("Jump to section \"${section.title}\"")
+        if (audioMode) {
+            seekAudio(SectionTimes.startMs(a, section.sentence, sectionTimes, audioDurationMs))
+        } else {
+            jumpTo(section.sentence)
+        }
+    }
+
+    private fun notifyChanged() {
+        onPlaybackChanged?.invoke()
+        Ambient.follow(playing)
+    }
+
     private var lastSave = 0L
 
     /** While the downloaded audio plays, keeps the progress bar and the saved place up to date. */
@@ -236,6 +346,14 @@ object Reader : Speaker.Listener {
         }
     }
 
+    private fun sentenceChanged() {
+        if (stopAtNextSentence >= 0 && index != stopAtNextSentence) {
+            DebugLog.i("Sleep timer: stopping at the end of the sentence")
+            stopAtNextSentence = -1
+            pause()
+        }
+    }
+
     /** Closes the open article, for example after it is deleted. */
     fun close() {
         leave()
@@ -258,13 +376,14 @@ object Reader : Speaker.Listener {
 
     /** Stops playing and saves the place, before switching to another article. */
     private fun leave() {
+        if (sleepMode == "section" || sleepMode == "article") clearSleep()
         pause()
         savePosition(force = true)
         releaseMedia()
         audioMode = false
         if (active) {
             active = false
-            onPlaybackChanged?.invoke()
+            notifyChanged()
         }
     }
 
@@ -308,6 +427,8 @@ object Reader : Speaker.Listener {
                 true
             }
             audioDurationMs = player.duration
+            val timesFile = Library.sectionsFile(e.title)
+            sectionTimes = if (timesFile.exists()) SectionTimes.parse(timesFile.readText()) else emptyMap()
             val start = audioPositionMs.coerceIn(0, maxOf(0, player.duration - 1000))
             player.seekTo(start)
             audioPositionMs = start
@@ -323,6 +444,7 @@ object Reader : Speaker.Listener {
 
     private fun releaseMedia() {
         main.removeCallbacks(tick)
+        sectionTimes = emptyMap()
         try { media?.release() } catch (t: Throwable) { /* nothing left to free */ }
         media = null
     }
@@ -361,8 +483,9 @@ object Reader : Speaker.Listener {
         }
         focus.abandon()
         savePosition(force = true)
+        if (sleepMode.isNotEmpty()) clearSleep()
         DebugLog.i("Finished \"$name\"")
-        onPlaybackChanged?.invoke()
+        notifyChanged()
     }
 
     fun play() {
@@ -397,7 +520,7 @@ object Reader : Speaker.Listener {
             startFrom(a, index)
         }
         PlaybackService.start(appContext)
-        onPlaybackChanged?.invoke()
+        notifyChanged()
     }
 
     fun pause() {
@@ -426,7 +549,7 @@ object Reader : Speaker.Listener {
             DebugLog.i("Paused at sentence ${index + 1}")
         }
         savePosition(force = true)
-        onPlaybackChanged?.invoke()
+        notifyChanged()
     }
 
     /** Stops and goes back to the start of the article. */
@@ -436,7 +559,7 @@ object Reader : Speaker.Listener {
         savePosition(force = true)
         if (active) {
             active = false
-            onPlaybackChanged?.invoke()
+            notifyChanged()
         }
     }
 
@@ -535,7 +658,11 @@ object Reader : Speaker.Listener {
         val (chunk, offset) = current(id) ?: return
         val a = article ?: return
         if (id.endsWith(":p")) return
-        index = a.sentenceAt(chunk, offset)
+        val started = a.sentenceAt(chunk, offset)
+        if (started != index) {
+            index = started
+            sentenceChanged()
+        }
         savePosition(force = false)
         topUp(a, chunk)
     }
@@ -545,7 +672,10 @@ object Reader : Speaker.Listener {
         val a = article ?: return
         positionsReported = true
         val sentence = a.sentenceAt(chunk, offset + start)
-        if (sentence != index) index = sentence
+        if (sentence != index) {
+            index = sentence
+            sentenceChanged()
+        }
     }
 
     override fun onSpeechDone(id: String) {
@@ -575,7 +705,7 @@ object Reader : Speaker.Listener {
         try { media?.pause() } catch (t: Throwable) { /* not playing */ }
         focus.abandon()
         show(text, error = true)
-        onPlaybackChanged?.invoke()
+        notifyChanged()
     }
 
     private fun show(text: String, error: Boolean = false) {

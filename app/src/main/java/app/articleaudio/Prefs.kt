@@ -21,6 +21,15 @@ object Prefs {
         get() = prefs.getFloat("speed", 1f)
         set(value) = prefs.edit().putFloat("speed", value).apply()
 
+    /** Background sound: "off", "rain", "wind" or "beach". */
+    var ambient: String
+        get() = prefs.getString("ambient", "off") ?: "off"
+        set(value) = prefs.edit().putString("ambient", value).apply()
+
+    var ambientVolume: Float
+        get() = prefs.getFloat("ambientVolume", 0.4f)
+        set(value) = prefs.edit().putFloat("ambientVolume", value).apply()
+
     /** Whether the notification permission has been asked for, so it is only asked once. */
     var askedForNotifications: Boolean
         get() = prefs.getBoolean("askedForNotifications", false)

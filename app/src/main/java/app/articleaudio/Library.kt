@@ -30,6 +30,9 @@ object Library {
     /** The downloaded audio file for an article, whether or not it exists yet. */
     fun audioFile(title: String): File = File(downloads, Wav.fileName(title) + ".m4a")
 
+    /** Where each section starts in the downloaded audio, if that was recorded. */
+    fun sectionsFile(title: String): File = File(downloads, Wav.fileName(title) + ".sections")
+
     fun find(id: String): LibraryEntry? = read(id)
 
     /** The article's picture, whether or not it exists. */
@@ -100,7 +103,10 @@ object Library {
     fun delete(id: String) {
         val old = read(id)
         File(root, id).deleteRecursively()
-        if (old != null) audioFile(old.title).delete()
+        if (old != null) {
+            audioFile(old.title).delete()
+            sectionsFile(old.title).delete()
+        }
         DebugLog.i("Deleted \"${old?.title ?: id}\" from the library")
         reload()
     }
