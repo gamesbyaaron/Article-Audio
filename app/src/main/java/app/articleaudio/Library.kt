@@ -51,7 +51,7 @@ object Library {
 
     /** Saves a fetched article. Keeps the reading position unless [resetPosition]. */
     @Synchronized
-    fun save(title: String, text: String, sentences: Int, resetPosition: Boolean): LibraryEntry {
+    fun save(title: String, text: String, sentences: Int, resetPosition: Boolean, description: String = ""): LibraryEntry {
         val id = Wav.fileName(title)
         val dir = File(root, id)
         dir.mkdirs()
@@ -72,6 +72,7 @@ object Library {
             imageCredit = old?.imageCredit ?: "",
             imageChecked = !resetPosition && old?.imageChecked == true,
             finished = !resetPosition && old?.finished == true,
+            description = description.ifEmpty { old?.description.orEmpty() },
         )
         write(entry)
         reload()

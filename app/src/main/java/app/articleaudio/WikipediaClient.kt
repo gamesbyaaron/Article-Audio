@@ -10,7 +10,7 @@ import java.net.URLEncoder
 object WikipediaClient {
     private const val USER_AGENT = "ArticleAudio/0.1 (personal text-to-speech reader for Android)"
 
-    data class Article(val title: String, val text: String)
+    data class Article(val title: String, val text: String, val description: String = "")
 
     class FetchException(message: String) : IOException(message)
 
@@ -186,7 +186,7 @@ object WikipediaClient {
     fun fetchPlainText(title: String): Article {
         val url = URL(
             "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2" +
-                "&prop=extracts&explaintext=1&exsectionformat=wiki&redirects=1" +
+                "&prop=extracts|description&explaintext=1&exsectionformat=wiki&redirects=1" +
                 "&titles=" + URLEncoder.encode(title, "UTF-8")
         )
         val connection = url.openConnection() as HttpURLConnection
@@ -209,7 +209,7 @@ object WikipediaClient {
             if (page.optBoolean("invalid")) throw FetchException("\"$title\" is not a valid article title")
             val text = page.optString("extract")
             if (text.isBlank()) throw FetchException("The article has no text to read")
-            return Article(page.optString("title", title), text)
+            return Article(page.optString("title", title), text, page.optString("description"))
         } finally {
             connection.disconnect()
         }
