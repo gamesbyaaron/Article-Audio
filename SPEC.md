@@ -122,6 +122,7 @@ Revised direction (agreed November 2026)
 This overrides the milestones above where they conflict.
 Read aloud live instead of generating audio files: store the cleaned article text and have the phone's built-in TextToSpeech speak it sentence by sentence inside a media service with lock-screen controls. No MediaCodec encoding, no generation service. Exporting an audio file becomes an optional later feature.
 Fetch articles as plain text from Wikipedia's API (it already drops tables, infoboxes, and references), which likely removes the need for jsoup.
+Download feature (owner, 17 November 2026): the owner wants to save an article as an audio file as well as hear it live. So audio export is a planned step, not an optional extra: synthesizeToFile, encode to .m4a with MediaCodec and MediaMuxer, in a foreground service with progress, as the original Milestone 4 describes.
 Revised order: 1) pipeline plus a Speak button, 2) paste or share a link and hear it read live, 3) cleanup rules with tests and a preview, 4) library, resume, lock-screen controls, speed and voice, attribution, 5) optional extras (audio export, pronunciation list, queue).
 
 Status
@@ -157,6 +158,7 @@ Done:
   - c. / ca. before a number become "circa"; a real minus sign before a number becomes "minus"
   - units after a number (km, m, cm, mm, mi, ft, kg, g, lb, mph, km/h, °C, °F, km2, m2, sq mi, sq ft) are spelled out and a following conversion in brackets is dropped; ranges like 10–15 km work; "in" is only treated as inches when a conversion follows
   - No. 3, e.g., i.e., vs., approx.; " & " between words becomes "and"
+  - an abbreviation in brackets after the words it stands for becomes ", abbreviated to X," (owner's request after testing step 3): "World Health Organization (WHO)", "Deoxyribonucleic acid (DNA)". It must be mostly capitals, not a Roman numeral, and its letters must appear in order in the few words before it, starting at the beginning of a word; "London (UK)" and "the film (PG)" are left alone. Not in a build yet: on the working branch, to go out with the next build.
   - left alone: scores and page ranges (3–1), St., Roman numerals, R&D, AT&T, $5 m, 5 m/s, ISO dates, any other brackets
 - Full text screen: the whole cleaned article, current sentence highlighted, follows along while playing; tap a sentence to jump to it.
 - Changes screen: every rewrite the rules made in this article as before → after, with Copy all. The Log also records the number of changes per rule.
@@ -172,4 +174,8 @@ Open:
 - No editing of the text before reading (the original spec had an editable preview).
 - Reading with the screen off may be stopped by Android; a proper background service with lock-screen controls is step 4.
 - The User-Agent has no contact address; Wikimedia asks for one. Add the repo URL if the owner wants.
-Next: step 4, library (saved articles, resume position), background playback with lock-screen controls, voice and speed settings, attribution.
+Owner's feedback on step 3 (build 7): it works; the one rewrite missing was abbreviations in brackets (rule added, see above).
+Next, order to be confirmed with the owner:
+- 4a: background playback with lock-screen and notification controls, voice and speed settings.
+- 4b: download an article as an .m4a audio file (uses the same foreground service as 4a).
+- 4c: library (saved articles, resume position, rename, delete) and attribution.
