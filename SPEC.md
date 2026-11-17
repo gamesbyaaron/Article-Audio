@@ -221,5 +221,27 @@ Open:
 - No list of past downloads yet; that is the library step.
 
 Pinned for later, not in the development order (owner, 17 November 2026): the long-term goal is a public app for others as well as the owner. That means finding articles inside the app (search, featured, most-read, random) on top of the saved library, and a release (name and icon without "Wikipedia", private signing key, attribution and Wikimedia API terms, Google Play). Do not start any of this until the owner asks, but keep choices release-friendly: attribution on every article, no accounts or tracking, cope with phones that have poor or no voices.
-Next:
-- 4c: library. Saved articles that play offline, resume position per article saved automatically to the sentence, progress shown in the list, rename, delete, a Refresh that re-fetches and resets the place, and attribution on every article. Each article shows whether it has a downloaded file; the app must then also play downloaded files itself (same player controls and lock-screen controls, exact times) and remember the position in them too (owner's request).
+Owner confirmed step 4b (build 13): the download works and plays in Files, Spotify and YT Music.
+
+Step 4c (library, resume, playing downloads in the app, attribution): built, waiting for the owner to test on the phone.
+Done:
+- Library.kt: every fetched article is saved in app storage (files/library/<title>/text.txt holds the text as fetched; details.properties holds name, dates, size and position). Articles are rebuilt from the saved text with the current cleanup rules when opened, so they work offline and benefit from later rule changes. LibraryEntry.kt is the pure, tested part.
+- Home screen: a Library list under the player, most recently opened first, showing percent read, approximate length, fetch date and whether audio is downloaded. Tap to open at the saved place.
+- Resume: the place is saved to the sentence on pause, stop, jumps, switching article, and every few seconds while playing. Fetching an article again keeps the place; Refresh re-fetches and starts from the beginning. Reaching the end resets to the start.
+- Playing downloads in the app: when an article has a downloaded file, the player card offers "Read live" or "Play download". The file is played with MediaPlayer through the same controls, lock-screen controls and audio-focus handling; times are exact and its position is remembered separately.
+- Article options on the player card: Original (opens the Wikipedia page), Rename, Refresh, Delete (with confirmation; also removes the app's copy of the audio).
+- Attribution on every open article: title, "licensed CC BY-SA 4.0", "Adapted for listening", fetch date, and the link to the original.
+- Unit tests: LibraryEntryTest (4).
+Owner should test on the phone:
+- Fetch two or three articles; they appear in the Library. Close the app completely, reopen, and open one: it should be where you left it, with no internet needed (try aeroplane mode).
+- Listen part-way, switch to another article, switch back: the place is kept and the percent in the list updates.
+- On an article with a download: Play download, drag the bar, use the 15-second buttons, lock the phone, pause, close the app, reopen: it resumes in the file.
+- Rename, Refresh and Delete.
+Open:
+- Not run on a phone yet.
+- The speed button applies on top of the speed a file was downloaded at, so a file made at 1.5× and played at 1.5× is faster than live reading at 1.5×.
+- In download mode the Full text screen does not follow along, and tapping a sentence there does nothing.
+- Rename, Refresh and Delete are only on the open article, not on each row of the list.
+- Articles fetched before this build are not in the library; fetch them again.
+
+After 4c the personal app is functionally complete; what follows is optional polish (queue, pronunciation list, more rules, icon and design) and then the pinned public version.

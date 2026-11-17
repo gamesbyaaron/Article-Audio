@@ -2,6 +2,7 @@ package app.articleaudio
 
 import android.content.Context
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
@@ -48,6 +49,17 @@ object Reader : Speaker.Listener {
     var voices by mutableStateOf<List<VoiceOption>>(emptyList())
         private set
 
+    /** The library entry for [article]. */
+    var entry by mutableStateOf<LibraryEntry?>(null)
+        private set
+    /** True when playing the downloaded audio file instead of reading live. */
+    var audioMode by mutableStateOf(false)
+        private set
+    var audioPositionMs by mutableIntStateOf(0)
+        private set
+    var audioDurationMs by mutableIntStateOf(0)
+        private set
+
     /** Called whenever playing or active changes, so the playback service can update. */
     var onPlaybackChanged: (() -> Unit)? = null
 
@@ -56,6 +68,20 @@ object Reader : Speaker.Listener {
     private lateinit var focus: AudioFocus
     private val main = Handler(Looper.getMainLooper())
     private var resumeWhenFocusReturns = false
+    private var media: MediaPlayer? = null
+    private var lastSave = 0L
+
+    /** While the downloaded audio plays, keeps the progress bar and the saved place up to date. */
+    private val tick = object : Runnable {
+        override fun run() {
+            if (!playing || !audioMode) return
+            try {
+                media?.let { audioPositionMs = it.currentPosition }
+            } catch (t: Throwable) { /* the player was released; the next state change sorts it out */ }
+            savePosition(force = false)
+            main.postDelayed(this, 500)
+        }
+    }
 
     // Every start gets a new generation number so callbacks from stopped speech are ignored.
     private var generation = 0
@@ -108,7 +134,9 @@ object Reader : Speaker.Listener {
     /** Makes a new voice or speed audible straight away. */
     private fun applyNow() {
         val a = article
-        if (playing && a != null) {
+        if (audioMode) {
+            if (playing) applyAudioSpeed()
+        } else if (playing && a != null) {
             startFrom(a, index)
         } else if (speaker.ready && !active) {
             speaker.speak("This is how the reading will sound.", "sample", flush = true)
@@ -122,26 +150,33 @@ object Reader : Speaker.Listener {
             show(parsed.message, error = true)
             return
         }
-        val requested = (parsed as WikiLink.Result.Article).title
-        stop()
+        fetchTitle((parsed as WikiLink.Result.Article).title, resetPosition = false)
+    }
+
+    /** Fetches the open article again from Wikipedia and starts it from the beginning. */
+    fun refresh() {
+        val e = entry ?: return
+        fetchTitle(e.title, resetPosition = true)
+    }
+
+    private fun fetchTitle(requested: String, resetPosition: Boolean) {
+        leave()
         loading = true
         show("Fetching \"$requested\"…")
         DebugLog.i("Fetching article \"$requested\"")
-        val maxChars = minOf(speaker.maxInput - 1, 3000)
+        val maxChars = maxChunk()
         val started = System.currentTimeMillis()
         thread(name = "fetch") {
             try {
                 val fetched = WikipediaClient.fetchPlainText(requested)
                 val built = ArticleText.build(fetched.title, fetched.text, maxChars)
+                val saved = Library.save(fetched.title, fetched.text, built.sentences.size, resetPosition)
                 val ms = System.currentTimeMillis() - started
                 main.post {
-                    article = built
-                    index = 0
-                    loading = false
-                    show("")
+                    display(built, saved)
                     DebugLog.i(
                         "Fetched \"${built.title}\" in $ms ms: ${fetched.text.length} characters, " +
-                            "${built.chunks.size} paragraphs and headings, ${built.sentences.size} sentences"
+                            "${built.chunks.size} paragraphs and headings, ${built.sentences.size} sentences. Saved to the library"
                     )
                     val perRule = built.changes.groupingBy { it.rule }.eachCount()
                         .entries.joinToString(", ") { "${it.key} ${it.value}" }
@@ -157,21 +192,191 @@ object Reader : Speaker.Listener {
         }
     }
 
+    /** Opens a saved article from the library, at the place it was left. Works offline. */
+    fun open(id: String) {
+        if (entry?.id == id && article != null) return
+        leave()
+        loading = true
+        show("Opening…")
+        val maxChars = maxChunk()
+        thread(name = "open") {
+            try {
+                val saved = Library.find(id) ?: throw IllegalStateException("It is no longer in the library")
+                val built = ArticleText.build(saved.title, Library.text(id), maxChars)
+                main.post {
+                    display(built, saved)
+                    DebugLog.i("Opened \"${saved.title}\" from the library at sentence ${index + 1} of ${built.sentences.size}")
+                }
+            } catch (t: Throwable) {
+                DebugLog.e("Opening library entry $id failed", t)
+                main.post {
+                    loading = false
+                    show("Could not open the article: ${t.message ?: t.javaClass.simpleName}", error = true)
+                }
+            }
+        }
+    }
+
+    /** Closes the open article, for example after it is deleted. */
+    fun close() {
+        leave()
+        article = null
+        entry = null
+    }
+
+    private fun maxChunk(): Int = minOf(speaker.maxInput - 1, 3000)
+
+    private fun display(built: Article, saved: LibraryEntry) {
+        article = built
+        entry = saved
+        index = saved.position.coerceIn(0, built.sentences.size - 1)
+        audioPositionMs = saved.audioPositionMs
+        audioDurationMs = 0
+        loading = false
+        show("")
+        Library.markOpened(saved.id)
+    }
+
+    /** Stops playing and saves the place, before switching to another article. */
+    private fun leave() {
+        pause()
+        savePosition(force = true)
+        releaseMedia()
+        audioMode = false
+        if (active) {
+            active = false
+            onPlaybackChanged?.invoke()
+        }
+    }
+
+    private fun savePosition(force: Boolean) {
+        val e = entry ?: return
+        val a = article ?: return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastSave < 5_000) return
+        lastSave = now
+        Library.savePosition(e.id, index, a.sentences.size, audioPositionMs)
+    }
+
+    /** Switches between reading live and playing the downloaded audio file. */
+    fun useAudio(on: Boolean) {
+        if (on == audioMode) return
+        pause()
+        if (on) {
+            if (!prepareMedia()) return
+        } else {
+            releaseMedia()
+        }
+        audioMode = on
+        DebugLog.i(if (on) "Switched to the downloaded audio" else "Switched to live reading")
+    }
+
+    private fun prepareMedia(): Boolean {
+        val e = entry ?: return false
+        val file = Library.audioFile(e.title)
+        if (!file.exists()) {
+            show("There is no downloaded audio for this article yet.", error = true)
+            return false
+        }
+        return try {
+            val player = MediaPlayer()
+            player.setAudioAttributes(AudioFocus.SPEECH)
+            player.setDataSource(file.path)
+            player.prepare()
+            player.setOnCompletionListener { finished() }
+            player.setOnErrorListener { _, what, extra ->
+                fail("The audio file could not be played (error $what, $extra)")
+                true
+            }
+            audioDurationMs = player.duration
+            val start = audioPositionMs.coerceIn(0, maxOf(0, player.duration - 1000))
+            player.seekTo(start)
+            audioPositionMs = start
+            media = player
+            DebugLog.i("Downloaded audio ready: ${player.duration / 1000} s, resuming at ${start / 1000} s")
+            true
+        } catch (t: Throwable) {
+            DebugLog.e("Could not open the downloaded audio", t)
+            show("The downloaded audio could not be opened.", error = true)
+            false
+        }
+    }
+
+    private fun releaseMedia() {
+        main.removeCallbacks(tick)
+        try { media?.release() } catch (t: Throwable) { /* nothing left to free */ }
+        media = null
+    }
+
+    /** The speed button applies on top of whatever speed the file was made at. */
+    private fun applyAudioSpeed() {
+        val player = media ?: return
+        try {
+            player.playbackParams = player.playbackParams.setSpeed(speed)
+        } catch (t: Throwable) {
+            DebugLog.e("Could not change the speed of the audio file", t)
+        }
+    }
+
+    private fun seekAudio(ms: Int) {
+        val player = media ?: return
+        val target = ms.coerceIn(0, maxOf(0, audioDurationMs - 500))
+        try {
+            player.seekTo(target)
+            audioPositionMs = target
+            savePosition(force = true)
+        } catch (t: Throwable) {
+            DebugLog.e("Could not move within the audio file", t)
+        }
+    }
+
+    /** The end of the article was reached, live or in the audio file. */
+    private fun finished() {
+        val name = article?.title
+        playing = false
+        active = false
+        index = 0
+        audioPositionMs = 0
+        if (audioMode) {
+            try { media?.seekTo(0) } catch (t: Throwable) { /* it is recreated on the next switch */ }
+        }
+        focus.abandon()
+        savePosition(force = true)
+        DebugLog.i("Finished \"$name\"")
+        onPlaybackChanged?.invoke()
+    }
+
     fun play() {
         val a = article ?: return
-        if (!speaker.ready) {
+        val player = media
+        if (audioMode && player == null) return
+        if (!audioMode && !speaker.ready) {
             show("The speech engine is not ready yet. Try again in a moment.", error = true)
             DebugLog.e("Play pressed before text-to-speech was ready")
             return
         }
         if (index >= a.sentences.size) index = 0
         resumeWhenFocusReturns = false
-        if (!focus.request()) DebugLog.e("Android did not grant audio focus; reading anyway")
+        if (!focus.request()) DebugLog.e("Android did not grant audio focus; playing anyway")
         playing = true
         active = true
         show("")
-        DebugLog.i("Play from sentence ${index + 1} of ${a.sentences.size}")
-        startFrom(a, index)
+        if (audioMode && player != null) {
+            DebugLog.i("Play downloaded audio from ${audioPositionMs / 1000} s")
+            try {
+                player.start()
+                applyAudioSpeed()
+                main.removeCallbacks(tick)
+                main.post(tick)
+            } catch (t: Throwable) {
+                DebugLog.e("Could not start the audio file", t)
+                fail("The audio file could not be played")
+                return
+            }
+        } else {
+            DebugLog.i("Play from sentence ${index + 1} of ${a.sentences.size}")
+            startFrom(a, index)
+        }
         PlaybackService.start(appContext)
         onPlaybackChanged?.invoke()
     }
@@ -186,15 +391,30 @@ object Reader : Speaker.Listener {
     /** Stops the voice but keeps the place. */
     private fun halt() {
         playing = false
-        generation++
-        speaker.stop()
-        DebugLog.i("Paused at sentence ${index + 1}")
+        if (audioMode) {
+            try {
+                media?.let {
+                    it.pause()
+                    audioPositionMs = it.currentPosition
+                }
+            } catch (t: Throwable) {
+                DebugLog.e("Could not pause the audio file", t)
+            }
+            DebugLog.i("Paused the audio at ${audioPositionMs / 1000} s")
+        } else {
+            generation++
+            speaker.stop()
+            DebugLog.i("Paused at sentence ${index + 1}")
+        }
+        savePosition(force = true)
         onPlaybackChanged?.invoke()
     }
 
+    /** Stops and goes back to the start of the article. */
     fun stop() {
         pause()
-        index = 0
+        if (audioMode) seekAudio(0) else index = 0
+        savePosition(force = true)
         if (active) {
             active = false
             onPlaybackChanged?.invoke()
@@ -225,6 +445,10 @@ object Reader : Speaker.Listener {
     /** Jumps roughly [seconds] of listening forwards or backwards, to the start of a sentence. */
     fun skipSeconds(seconds: Int) {
         val a = article ?: return
+        if (audioMode) {
+            seekAudio(audioPositionMs + seconds * 1000)
+            return
+        }
         val target = a.startChars[index] + (seconds * CHARS_PER_SECOND * speed).toInt()
         var sentence = a.sentenceAtChar(target.coerceIn(0, maxOf(0, a.totalChars - 1)))
         if (seconds < 0 && sentence >= index) sentence = index - 1
@@ -235,13 +459,19 @@ object Reader : Speaker.Listener {
     /** Jumps to a point in the article, where 0 is the start and 1 is the end. */
     fun seekTo(fraction: Float) {
         val a = article ?: return
+        if (audioMode) {
+            seekAudio((fraction * audioDurationMs).toInt())
+            return
+        }
         jumpTo(a.sentenceAtChar((fraction * a.totalChars).toInt()))
     }
 
     fun jumpTo(sentence: Int) {
         val a = article ?: return
+        if (audioMode) return
         index = sentence.coerceIn(0, a.sentences.size - 1)
         if (playing) startFrom(a, index)
+        savePosition(force = true)
     }
 
     /** Starts speaking at [sentence], replacing whatever is queued. */
@@ -287,6 +517,7 @@ object Reader : Speaker.Listener {
         val a = article ?: return
         if (id.endsWith(":p")) return
         index = a.sentenceAt(chunk, offset)
+        savePosition(force = false)
         topUp(a, chunk)
     }
 
@@ -308,14 +539,7 @@ object Reader : Speaker.Listener {
                 else "Speech engine does not report word positions: tracking by paragraph"
             )
         }
-        if (id == finalId) {
-            playing = false
-            active = false
-            index = 0
-            focus.abandon()
-            DebugLog.i("Finished reading \"${a.title}\"")
-            onPlaybackChanged?.invoke()
-        }
+        if (id == finalId) finished()
     }
 
     override fun onSpeechError(id: String, code: Int) {
@@ -329,6 +553,7 @@ object Reader : Speaker.Listener {
         active = false
         generation++
         speaker.stop()
+        try { media?.pause() } catch (t: Throwable) { /* not playing */ }
         focus.abandon()
         show(text, error = true)
         onPlaybackChanged?.invoke()
