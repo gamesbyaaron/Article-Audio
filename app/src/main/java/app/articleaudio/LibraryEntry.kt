@@ -18,6 +18,10 @@ data class LibraryEntry(
     /** Place to resume the downloaded audio from, in milliseconds. */
     val audioPositionMs: Int,
     val hasAudio: Boolean = false,
+    /** Credit line for the article's picture; empty if it has none. */
+    val imageCredit: String = "",
+    /** True once the app has looked for a picture, so it does not keep asking. */
+    val imageChecked: Boolean = false,
 ) {
     val percent: Int get() = if (sentences <= 1) 0 else (position * 100 / (sentences - 1)).coerceIn(0, 100)
 
@@ -30,6 +34,8 @@ data class LibraryEntry(
         setProperty("position", position.toString())
         setProperty("sentences", sentences.toString())
         setProperty("audioPositionMs", audioPositionMs.toString())
+        setProperty("imageCredit", imageCredit)
+        setProperty("imageChecked", imageChecked.toString())
     }
 
     companion object {
@@ -48,6 +54,8 @@ data class LibraryEntry(
                 sentences = long("sentences").toInt(),
                 audioPositionMs = long("audioPositionMs").toInt(),
                 hasAudio = hasAudio,
+                imageCredit = p.getProperty("imageCredit") ?: "",
+                imageChecked = p.getProperty("imageChecked") == "true",
             )
         }
     }

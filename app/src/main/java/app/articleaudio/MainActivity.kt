@@ -88,6 +88,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 
@@ -165,6 +172,7 @@ private fun App(onPlay: () -> Unit) {
         "text" -> TextScreen(onBack = back, onPlay = onPlay)
         "changes" -> ChangesScreen(onBack = back)
         "settings" -> SettingsScreen(onBack = back)
+        "search" -> SearchScreen(onBack = back)
         "log" -> LogScreen(onBack = back)
         else -> LibraryScreen(onPlay = onPlay)
     }
@@ -180,7 +188,6 @@ private fun AppIcon(id: Int, description: String?, modifier: Modifier = Modifier
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LibraryScreen(onPlay: () -> Unit) {
-    var adding by remember { mutableStateOf(false) }
     val entries = Library.entries
     val open = Reader.entry
 
@@ -195,9 +202,9 @@ private fun LibraryScreen(onPlay: () -> Unit) {
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { adding = true },
-                icon = { AppIcon(R.drawable.ic_add, null) },
-                text = { Text("Add article") },
+                onClick = { Nav.screen = "search" },
+                icon = { AppIcon(R.drawable.ic_search, null) },
+                text = { Text("Find article") },
             )
         },
     ) { padding ->
@@ -227,7 +234,6 @@ private fun LibraryScreen(onPlay: () -> Unit) {
         }
     }
 
-    if (adding) AddArticleDialog(onDismiss = { adding = false })
 }
 
 /** Fetching progress, or the last error. */
@@ -253,8 +259,8 @@ private fun EmptyLibrary() {
     ) {
         Text("Nothing here yet", style = MaterialTheme.typography.titleLarge)
         Text(
-            "Share an article to Article Audio from the Wikipedia app or your browser, " +
-                "or tap Add article and paste a link. Everything you open is saved here and works without internet.",
+            "Tap Find article and search for any Wikipedia article, or share one to Article Audio " +
+                "from the Wikipedia app or your browser. Everything you open is saved here and works without internet.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -281,6 +287,7 @@ private fun ContinueCard(entry: LibraryEntry, onPlay: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            EntryPicture(saved, 56.dp)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     if (Reader.playing) "Now playing" else "Continue listening",
@@ -320,7 +327,13 @@ private fun LibraryCard(entry: LibraryEntry) {
         enabled = !Reader.loading,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+        EntryPicture(entry, 64.dp)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(entry.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             LinearProgressIndicator(
                 progress = { entry.percent / 100f },
@@ -342,6 +355,7 @@ private fun LibraryCard(entry: LibraryEntry) {
                     AppIcon(R.drawable.ic_download, "Audio downloaded", Modifier.size(16.dp))
                 }
             }
+        }
         }
     }
 }
@@ -382,6 +396,113 @@ private fun AddArticleDialog(onDismiss: () -> Unit) {
 }
 
 private fun day(time: Long): String = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(time))
+
+// ---- Search -----------------------------------------------------------------------------
+
+/** Search Wikipedia as you type; tap a result to fetch it and open the player. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchScreen(onBack: () -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<WikipediaClient.SearchResult>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf("") }
+    var pasting by remember { mutableStateOf(false) }
+    val focus = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.isEmpty()) {
+            results = emptyList()
+            problem = ""
+            return@LaunchedEffect
+        }
+        delay(300) // wait for a pause in typing
+        searching = true
+        try {
+            results = withContext(Dispatchers.IO) { WikipediaClient.search(q) }
+            problem = if (results.isEmpty()) "No articles start with \"$q\"." else ""
+        } catch (t: Throwable) {
+            DebugLog.e("Search for \"$q\" failed", t)
+            problem = "Could not search: ${t.message ?: t.javaClass.simpleName}. Check the internet connection."
+        }
+        searching = false
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Find article") },
+                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
+                actions = { TextButton(onClick = { pasting = true }) { Text("Paste link") } },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.padding(padding).fillMaxSize().imePadding(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            item {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Search Wikipedia") },
+                    leadingIcon = { AppIcon(R.drawable.ic_search, null) },
+                    trailingIcon = {
+                        if (searching) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus).padding(bottom = 8.dp),
+                )
+            }
+            if (problem.isNotEmpty()) {
+                item {
+                    Text(problem, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp))
+                }
+            }
+            items(results.size, key = { results[it].title }) { i ->
+                val result = results[i]
+                val saved = Library.entries.firstOrNull { it.title == result.title }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.medium)
+                        .clickable {
+                            if (saved != null) Reader.open(saved.id) else Reader.fetchByTitle(result.title)
+                            Nav.screen = "player"
+                        }
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val url = result.thumbnail
+                    if (url != null) ArticlePicture({ Pictures.fromUrl(url) }, url, 48.dp)
+                    else ArticlePicture({ null }, result.title, 48.dp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(result.title, style = MaterialTheme.typography.bodyLarge)
+                        val note = listOfNotNull(
+                            result.description.ifEmpty { null },
+                            if (saved != null) "in your library" else null,
+                        ).joinToString(" · ")
+                        if (note.isNotEmpty()) {
+                            Text(
+                                note,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (pasting) AddArticleDialog(onDismiss = { pasting = false })
+}
 
 // ---- Player -----------------------------------------------------------------------------
 
@@ -494,7 +615,10 @@ private fun PlayerBody(article: Article, saved: LibraryEntry, onPlay: () -> Unit
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text(saved.name, style = MaterialTheme.typography.headlineSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            EntryPicture(saved, 88.dp)
+            Text(saved.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+        }
         if (Reader.message.isNotEmpty()) StatusLine()
 
         if (saved.hasAudio) {
@@ -567,7 +691,8 @@ private fun PlayerBody(article: Article, saved: LibraryEntry, onPlay: () -> Unit
 
         Text(
             "Text from the Wikipedia article \"${saved.title}\", licensed CC BY-SA 4.0. " +
-                "Adapted for listening. Fetched ${day(saved.fetchedAt)}.",
+                "Adapted for listening. Fetched ${day(saved.fetchedAt)}." +
+                if (saved.imageCredit.isNotEmpty()) "\n${saved.imageCredit}." else "",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 24.dp),
@@ -698,15 +823,9 @@ private fun TextScreen(onBack: () -> Unit, onPlay: () -> Unit) {
             TopAppBar(
                 title = { Text(article?.title ?: "Full text", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
-                actions = {
-                    if (article != null) {
-                        TextButton(onClick = { if (Reader.playing) Reader.pause() else onPlay() }) {
-                            Text(if (Reader.playing) "Pause" else "Play")
-                        }
-                    }
-                },
             )
         },
+        bottomBar = { if (article != null) MiniPlayer(article, onPlay) },
     ) { padding ->
         if (article == null) {
             Text("No article loaded.", modifier = Modifier.padding(padding).padding(16.dp))
@@ -718,6 +837,39 @@ private fun TextScreen(onBack: () -> Unit, onPlay: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 items(article.chunks.size) { i -> ChunkText(article, i) }
+            }
+        }
+    }
+}
+
+/** A compact player along the bottom of the Full text screen. Tap the title to open the full player. */
+@Composable
+private fun MiniPlayer(article: Article, onPlay: () -> Unit) {
+    val fraction = if (Reader.audioMode) Reader.audioPositionMs.toFloat() / maxOf(1, Reader.audioDurationMs)
+    else article.startChars[Reader.index.coerceIn(0, article.sentences.size - 1)].toFloat() / maxOf(1, article.totalChars)
+    val name = Reader.entry?.let { e -> Library.entries.firstOrNull { it.id == e.id }?.name } ?: article.title
+    Surface(tonalElevation = 3.dp, shadowElevation = 6.dp) {
+        Column(modifier = Modifier.navigationBarsPadding()) {
+            LinearProgressIndicator(progress = { fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    name,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).clickable { Nav.screen = "player" }.padding(8.dp),
+                )
+                SkipButton(R.drawable.ic_replay, "Back 15 seconds") { Reader.skipSeconds(-15) }
+                FilledIconButton(onClick = { if (Reader.playing) Reader.pause() else onPlay() }, modifier = Modifier.size(48.dp)) {
+                    AppIcon(
+                        if (Reader.playing) R.drawable.ic_pause else R.drawable.ic_play,
+                        if (Reader.playing) "Pause" else "Play",
+                    )
+                }
+                SkipButton(R.drawable.ic_forward, "Forward 15 seconds") { Reader.skipSeconds(15) }
             }
         }
     }

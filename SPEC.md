@@ -252,6 +252,16 @@ Polish, build 1 of 2 ("make it pretty", generic; owner, 17 November 2026): built
 - Player screen: title, live/downloaded-audio chips, the current sentence in a large serif caption (tap for full text), progress bar with times, speed, back 15, a large play/pause button, forward 15, Restart; download section; attribution. Overflow menu: Open on Wikipedia, Cleanup changes, Rename, Refresh, Delete.
 - Full text screen: book-style serif text, larger line height and margins.
 - Icons are vector drawables in res/drawable (no icon library added).
-Next, polish build 2: app icon, colour scheme and dark mode, transitions, first-run hints.
+Owner: polish build 1 (build 17) "looks prettier". Polish build 2 (icon, colours, transitions) dropped for now at the owner's request.
+
+Search, article pictures, player on Full text (owner, 17 November 2026): built, merged on a passing build at the owner's request, waiting for the owner to test. In-app search is no longer pinned.
+- Search: "Find article" on the library opens a search screen with suggestions as you type (300 ms pause), using Wikipedia's prefix search with each result's short description and a free-licensed thumbnail. Tapping a result fetches it (or opens it if already saved). "Paste link" stays in the top bar.
+- Pictures: the article's lead picture is fetched only if free-licensed (pageimages with pilicense=free, then the file's NonFree flag is checked), stored with the article as image.jpg and shown on library cards, the continue card and the player. Credit (author and licence, from the file's metadata) is shown under the article's attribution. Articles with only non-free pictures stay blank. Existing library articles get their picture the next time they are opened. Pictures come from upload.wikimedia.org, Wikimedia's image server.
+- Full text screen: a compact player bar along the bottom (progress, back 15, play/pause, forward 15; tap the title for the full player).
+- Unit tests: ImageCreditTest (4).
+Open:
+- Not run on a phone yet.
+- Search suggestions match the start of titles, as Wikipedia's own search box does; a full-text search is possible later.
+
 
 After 4c the personal app is functionally complete; what follows is optional polish (queue, pronunciation list, more rules, icon and design) and then the pinned public version.
