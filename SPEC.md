@@ -158,7 +158,7 @@ Done:
   - c. / ca. before a number become "circa"; a real minus sign before a number becomes "minus"
   - units after a number (km, m, cm, mm, mi, ft, kg, g, lb, mph, km/h, °C, °F, km2, m2, sq mi, sq ft) are spelled out and a following conversion in brackets is dropped; ranges like 10–15 km work; "in" is only treated as inches when a conversion follows
   - No. 3, e.g., i.e., vs., approx.; " & " between words becomes "and"
-  - an abbreviation in brackets after the words it stands for becomes ", abbreviated to X," (owner's request after testing step 3): "World Health Organization (WHO)", "Deoxyribonucleic acid (DNA)". It must be mostly capitals, not a Roman numeral, and its letters must appear in order in the few words before it, starting at the beginning of a word; "London (UK)" and "the film (PG)" are left alone. Not in a build yet: on the working branch, to go out with the next build.
+  - an abbreviation in brackets after the words it stands for becomes ", abbreviated to X," (owner's request after testing step 3): "World Health Organization (WHO)", "Deoxyribonucleic acid (DNA)". It must be mostly capitals, not a Roman numeral, and its letters must appear in order in the few words before it, starting at the beginning of a word; "London (UK)" and "the film (PG)" are left alone.
   - left alone: scores and page ranges (3–1), St., Roman numerals, R&D, AT&T, $5 m, 5 m/s, ISO dates, any other brackets
 - Full text screen: the whole cleaned article, current sentence highlighted, follows along while playing; tap a sentence to jump to it.
 - Changes screen: every rewrite the rules made in this article as before → after, with Copy all. The Log also records the number of changes per rule.
@@ -175,7 +175,25 @@ Open:
 - Reading with the screen off may be stopped by Android; a proper background service with lock-screen controls is step 4.
 - The User-Agent has no contact address; Wikimedia asks for one. Add the repo URL if the owner wants.
 Owner's feedback on step 3 (build 7): it works; the one rewrite missing was abbreviations in brackets (rule added, see above).
-Next, order to be confirmed with the owner:
-- 4a: background playback with lock-screen and notification controls, voice and speed settings.
+
+Step 4a (listening with the phone locked, voice and speed): built, waiting for the owner to test on the phone.
+Done:
+- PlaybackService.kt: a foreground service (type mediaPlayback) that runs from Play until Stop or the end of the article, including while paused. It holds a MediaSession, so play/pause, back and next work from the notification, the lock screen and headphone buttons, and a wake lock while reading. It uses the platform's own MediaSession and Notification.MediaStyle rather than Media3, so there is no new dependency. Reader.kt still does the reading; the service only reports its state to Android.
+- AudioFocus.kt: music apps pause when reading starts; reading pauses for calls and other short interruptions and resumes afterwards; pauses for good when another player takes over, and when headphones are unplugged.
+- Settings screen (top bar): speed from 0.5× to 2.5× in steps of 0.25, and a voice picker listing the phone's offline English voices plus "Phone default". Both are saved (Prefs.kt), apply immediately while playing, and otherwise speak a short sample.
+- Android 13+: the first Play asks for permission to show notifications. Reading works either way.
+- Logged: service start and end, voice and speed changes, the number of voices found, every focus interruption, permission result.
+Owner should test on the phone:
+- Press Play, lock the phone: reading should continue. Leave it for ten minutes or more.
+- Lock screen and notification: title shown; Pause, Play, Back and Next work. Headphone button if available.
+- Start music in another app, then press Play here: the music should pause. Play something else while an article reads: the article should pause.
+- Settings: change speed and voice while playing and while stopped.
+- Stop and go to start: the notification disappears.
+- If anything stops by itself, copy the Log.
+Open:
+- Not run on a phone yet; only compiled and unit tested by CI.
+- Voice names are the engine's own codes (for example en-us-x-iom-local); there is no friendlier name available.
+- Some phone makers' battery savers stop background apps regardless; if reading stops with the screen off, the Log will show whether the service ended.
+Next:
 - 4b: download an article as an .m4a audio file (uses the same foreground service as 4a).
 - 4c: library (saved articles, resume position, rename, delete) and attribution.

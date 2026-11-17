@@ -1,9 +1,11 @@
 package app.articleaudio
 
 import android.content.Context
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -32,9 +34,25 @@ object Reader : Speaker.Listener {
         private set
     var playing by mutableStateOf(false)
         private set
+    /** True from Play until Stop or the end of the article, including while paused. */
+    var active by mutableStateOf(false)
+        private set
+    var speed by mutableFloatStateOf(1f)
+        private set
+    /** The chosen voice, or null for the phone's default. */
+    var voiceName by mutableStateOf<String?>(null)
+        private set
+    var voices by mutableStateOf<List<VoiceOption>>(emptyList())
+        private set
 
+    /** Called whenever playing or active changes, so the playback service can update. */
+    var onPlaybackChanged: (() -> Unit)? = null
+
+    private lateinit var appContext: Context
     private lateinit var speaker: Speaker
+    private lateinit var focus: AudioFocus
     private val main = Handler(Looper.getMainLooper())
+    private var resumeWhenFocusReturns = false
 
     // Every start gets a new generation number so callbacks from stopped speech are ignored.
     private var generation = 0
@@ -44,7 +62,54 @@ object Reader : Speaker.Listener {
     private var positionsLogged = false
 
     fun init(context: Context) {
-        speaker = Speaker(context, this)
+        appContext = context.applicationContext
+        speed = Prefs.speed
+        voiceName = Prefs.voiceName
+        focus = AudioFocus(appContext, ::onFocusChange)
+        speaker = Speaker(appContext, this)
+    }
+
+    override fun onSpeechReady() {
+        speaker.setRate(speed)
+        val saved = voiceName
+        if (saved != null && !speaker.setVoice(saved)) {
+            DebugLog.e("Saved voice \"$saved\" is not available; using the phone's default")
+            voiceName = null
+            Prefs.voiceName = null
+        }
+        voices = speaker.voiceOptions()
+        DebugLog.i(
+            "Voices to choose from: ${voices.size}. Using ${voiceName ?: "the phone's default"} at speed $speed"
+        )
+    }
+
+    fun changeSpeed(value: Float) {
+        speed = value
+        Prefs.speed = value
+        speaker.setRate(value)
+        DebugLog.i("Speed set to $value")
+        applyNow()
+    }
+
+    fun changeVoice(name: String?) {
+        if (!speaker.setVoice(name) && name != null) {
+            show("That voice could not be used.", error = true)
+            return
+        }
+        voiceName = name
+        Prefs.voiceName = name
+        DebugLog.i("Voice set to ${name ?: "the phone's default"}")
+        applyNow()
+    }
+
+    /** Makes a new voice or speed audible straight away. */
+    private fun applyNow() {
+        val a = article
+        if (playing && a != null) {
+            startFrom(a, index)
+        } else if (speaker.ready && !active) {
+            speaker.speak("This is how the reading will sound.", "sample", flush = true)
+        }
     }
 
     fun fetch(input: String) {
@@ -97,23 +162,59 @@ object Reader : Speaker.Listener {
             return
         }
         if (index >= a.sentences.size) index = 0
+        resumeWhenFocusReturns = false
+        if (!focus.request()) DebugLog.e("Android did not grant audio focus; reading anyway")
         playing = true
+        active = true
         show("")
         DebugLog.i("Play from sentence ${index + 1} of ${a.sentences.size}")
         startFrom(a, index)
+        PlaybackService.start(appContext)
+        onPlaybackChanged?.invoke()
     }
 
     fun pause() {
+        resumeWhenFocusReturns = false
         if (!playing) return
+        halt()
+        focus.abandon()
+    }
+
+    /** Stops the voice but keeps the place. */
+    private fun halt() {
         playing = false
         generation++
         speaker.stop()
         DebugLog.i("Paused at sentence ${index + 1}")
+        onPlaybackChanged?.invoke()
     }
 
     fun stop() {
         pause()
         index = 0
+        if (active) {
+            active = false
+            onPlaybackChanged?.invoke()
+        }
+    }
+
+    /** A call or another app took over the sound, or gave it back. */
+    private fun onFocusChange(change: Int) {
+        when (change) {
+            AudioManager.AUDIOFOCUS_LOSS -> if (playing) {
+                DebugLog.i("Another app took over the sound: pausing")
+                pause()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> if (playing) {
+                DebugLog.i("Sound interrupted for a moment: pausing until it returns")
+                halt()
+                resumeWhenFocusReturns = true
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> if (resumeWhenFocusReturns) {
+                DebugLog.i("Sound returned: resuming")
+                play()
+            }
+        }
     }
 
     fun skip(by: Int) = jumpTo(index + by)
@@ -190,8 +291,11 @@ object Reader : Speaker.Listener {
         }
         if (id == finalId) {
             playing = false
+            active = false
             index = 0
+            focus.abandon()
             DebugLog.i("Finished reading \"${a.title}\"")
+            onPlaybackChanged?.invoke()
         }
     }
 
@@ -203,9 +307,12 @@ object Reader : Speaker.Listener {
     private fun fail(text: String) {
         DebugLog.e(text)
         playing = false
+        active = false
         generation++
         speaker.stop()
+        focus.abandon()
         show(text, error = true)
+        onPlaybackChanged?.invoke()
     }
 
     private fun show(text: String, error: Boolean = false) {
