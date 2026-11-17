@@ -1,12 +1,16 @@
 package app.articleaudio
 
-import android.os.Build
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +32,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -39,10 +45,12 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -56,11 +64,27 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 class MainActivity : ComponentActivity() {
+    private val askForNotifications =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            DebugLog.i("Notification permission " + if (granted) "granted" else "denied")
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) handleShare(intent)
-        setContent { AppTheme { App() } }
+        setContent { AppTheme { App(onPlay = ::play) } }
+    }
+
+    /** Starts reading. The first time, also asks to show the playback notification (Android 13+). */
+    private fun play() {
+        if (Build.VERSION.SDK_INT >= 33 && !Prefs.askedForNotifications &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Prefs.askedForNotifications = true
+            askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        Reader.play()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -92,28 +116,32 @@ private fun AppTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun App() {
+private fun App(onPlay: () -> Unit) {
     var screen by rememberSaveable { mutableStateOf("home") }
     val home = { screen = "home" }
     if (screen != "home") BackHandler(onBack = home)
     when (screen) {
         "log" -> LogScreen(onBack = home)
-        "text" -> TextScreen(onBack = home)
+        "text" -> TextScreen(onBack = home, onPlay = onPlay)
         "changes" -> ChangesScreen(onBack = home)
-        else -> HomeScreen(onOpen = { screen = it })
+        "settings" -> SettingsScreen(onBack = home)
+        else -> HomeScreen(onOpen = { screen = it }, onPlay = onPlay)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomeScreen(onOpen: (String) -> Unit) {
+private fun HomeScreen(onOpen: (String) -> Unit, onPlay: () -> Unit) {
     val clipboard = LocalClipboardManager.current
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Article Audio") },
-                actions = { TextButton(onClick = { onOpen("log") }) { Text("Log") } },
+                actions = {
+                    TextButton(onClick = { onOpen("settings") }) { Text("Settings") }
+                    TextButton(onClick = { onOpen("log") }) { Text("Log") }
+                },
             )
         },
     ) { padding ->
@@ -158,18 +186,19 @@ private fun HomeScreen(onOpen: (String) -> Unit) {
             }
 
             val article = Reader.article
-            if (article != null) ArticlePlayer(article, onOpen)
+            if (article != null) ArticlePlayer(article, onOpen, onPlay)
         }
     }
 }
 
 @Composable
-private fun ArticlePlayer(article: Article, onOpen: (String) -> Unit) {
+private fun ArticlePlayer(article: Article, onOpen: (String) -> Unit, onPlay: () -> Unit) {
     val index = Reader.index.coerceIn(0, article.sentences.size - 1)
     val current = article.sentences[index]
     // Built-in voices speak roughly 900 characters a minute at normal speed.
-    val minutesLeft = remember(article, index) {
-        maxOf(1, article.sentences.drop(index).sumOf { it.text.length } / 900)
+    val speed = Reader.speed
+    val minutesLeft = remember(article, index, speed) {
+        maxOf(1, (article.sentences.drop(index).sumOf { it.text.length } / (900 * speed)).toInt())
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -189,7 +218,7 @@ private fun ArticlePlayer(article: Article, onOpen: (String) -> Unit) {
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { Reader.skip(-1) }) { Text("Back") }
-                Button(onClick = { if (Reader.playing) Reader.pause() else Reader.play() }) {
+                Button(onClick = { if (Reader.playing) Reader.pause() else onPlay() }) {
                     Text(if (Reader.playing) "Pause" else "Play")
                 }
                 OutlinedButton(onClick = { Reader.skip(1) }) { Text("Next") }
@@ -206,7 +235,7 @@ private fun ArticlePlayer(article: Article, onOpen: (String) -> Unit) {
 /** The whole cleaned article. The sentence being read is highlighted; tap any sentence to jump to it. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TextScreen(onBack: () -> Unit) {
+private fun TextScreen(onBack: () -> Unit, onPlay: () -> Unit) {
     val article = Reader.article
     val listState = rememberLazyListState()
     val currentChunk = article?.sentences?.getOrNull(Reader.index)?.chunk ?: 0
@@ -222,7 +251,7 @@ private fun TextScreen(onBack: () -> Unit) {
                 navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
                 actions = {
                     if (article != null) {
-                        TextButton(onClick = { if (Reader.playing) Reader.pause() else Reader.play() }) {
+                        TextButton(onClick = { if (Reader.playing) Reader.pause() else onPlay() }) {
                             Text(if (Reader.playing) "Pause" else "Play")
                         }
                     }
@@ -323,6 +352,73 @@ private fun ChangesScreen(onBack: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** Reading speed and voice. Both are remembered and apply to the next thing spoken. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsScreen(onBack: () -> Unit) {
+    var slider by remember { mutableFloatStateOf(Reader.speed) }
+    val voices = Reader.voices
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+        ) {
+            item {
+                Text("Speed: ${"%.2f".format(slider)}×", style = MaterialTheme.typography.titleMedium)
+                Slider(
+                    value = slider,
+                    onValueChange = { slider = it },
+                    onValueChangeFinished = { Reader.changeSpeed(slider) },
+                    valueRange = 0.5f..2.5f,
+                    steps = 7,
+                )
+                Text(
+                    "Voice",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(top = 16.dp),
+                )
+                Text(
+                    "Voices installed on this phone that work without internet. " +
+                        "More can be added in the phone's text-to-speech settings.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                VoiceRow("Phone default", "", Reader.voiceName == null) { Reader.changeVoice(null) }
+            }
+            items(voices.size) { i ->
+                val voice = voices[i]
+                VoiceRow(voice.label, voice.name, Reader.voiceName == voice.name) { Reader.changeVoice(voice.name) }
+            }
+            if (Reader.message.isNotEmpty() && Reader.messageIsError) {
+                item { Text(Reader.message, color = MaterialTheme.colorScheme.error) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceRow(label: String, detail: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Column {
+            Text(label)
+            if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

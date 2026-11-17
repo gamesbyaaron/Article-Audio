@@ -68,6 +68,46 @@ class CleanupTest {
 
     @Test fun ampersandBetweenWords() = assertEquals("Smith and Jones", clean("Smith & Jones"))
 
+    // ---- Abbreviations in brackets ----
+
+    @Test fun abbreviationFromInitials() = assertEquals(
+        "The World Health Organization, abbreviated to WHO, is an agency.",
+        clean("The World Health Organization (WHO) is an agency."),
+    )
+
+    @Test fun abbreviationSkippingSmallWords() = assertEquals(
+        "The National Aeronautics and Space Administration, abbreviated to NASA, runs it.",
+        clean("The National Aeronautics and Space Administration (NASA) runs it."),
+    )
+
+    @Test fun abbreviationFromInsideAWord() = assertEquals(
+        "Deoxyribonucleic acid, abbreviated to DNA, is a polymer.",
+        clean("Deoxyribonucleic acid (DNA) is a polymer."),
+    )
+
+    @Test fun pluralAbbreviation() = assertEquals(
+        "Many non-governmental organizations, abbreviated to NGOs, took part.",
+        clean("Many non-governmental organizations (NGOs) took part."),
+    )
+
+    @Test fun abbreviationBeforeFullStop() = assertEquals(
+        "It joined the European Union, abbreviated to EU.",
+        clean("It joined the European Union (EU)."),
+    )
+
+    @Test fun abbreviationAfterPronunciationIsRemoved() = assertEquals(
+        "The North Atlantic Treaty Organization, abbreviated to NATO, was founded in 1949.",
+        clean("The North Atlantic Treaty Organization (NATO; /ˈneɪtoʊ/) was founded in 1949."),
+    )
+
+    @Test fun capitalsThatAreNotAnAbbreviationOfTheWordsBefore() = unchanged("He was born in London (UK) and left.")
+
+    @Test fun ratingInBrackets() = unchanged("The film (PG) did well.")
+
+    @Test fun romanNumeralInBrackets() = unchanged("The Vickers Mark (VI) tank was light.")
+
+    @Test fun ordinaryWordInBrackets() = unchanged("The Organization of States (see below) met.")
+
     // ---- Left unchanged because they are ambiguous ----
 
     @Test fun ampersandInsideNames() = unchanged("R&D at AT&T")

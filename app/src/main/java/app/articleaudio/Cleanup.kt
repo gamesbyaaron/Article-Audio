@@ -19,14 +19,23 @@ object Cleanup {
         return Result(tidy(text), changes)
     }
 
-    private class Rule(val name: String, pattern: String, val replace: (MatchResult) -> String?) {
+    /**
+     * [replace] returns the new text for a match, or null to leave it. Rules that need to look
+     * at the words before the match use [context] instead, which also gets the whole text.
+     */
+    private class Rule(
+        val name: String,
+        pattern: String,
+        val context: ((MatchResult, String) -> String?)? = null,
+        val replace: (MatchResult) -> String? = { null },
+    ) {
         val regex = Regex(pattern)
 
         fun apply(text: String, changes: MutableList<Change>): String {
             val out = StringBuilder()
             var last = 0
             for (m in regex.findAll(text)) {
-                val replacement = replace(m) ?: continue
+                val replacement = (if (context != null) context.invoke(m, text) else replace(m)) ?: continue
                 if (replacement == m.value) continue
                 out.append(text, last, m.range.first).append(replacement)
                 last = m.range.last + 1
@@ -84,6 +93,33 @@ object Cleanup {
     private val ipaInBrackets = Regex("\\[[^\\]]*[^\\x00-\\x7F][^\\]]*\\]")
     private val monthAndYearOnly = Regex("^$MONTH $YEAR$")
 
+    private val romanNumeral = Regex("^[IVXLCDM]+$")
+
+    /**
+     * True if [token] looks like an abbreviation of the words just before it: mostly capitals,
+     * not a Roman numeral, its first letter starts one of those words and the rest of its
+     * capitals follow in order. "London (UK)" and "the film (PG)" fail this and are left alone.
+     */
+    private fun isAbbreviationOf(before: String, token: String): Boolean {
+        val capitals = token.filter { it.isUpperCase() }
+        if (capitals.length < 2 || capitals.length * 2 < token.count { it.isLetter() }) return false
+        if (romanNumeral.matches(token)) return false
+        val words = before.trim().split(Regex("\\s+")).takeLast(capitals.length + 3)
+        val wanted = capitals.lowercase()
+        for (i in words.indices) {
+            if (!words[i].trimStart('(', '"', '“', '\'').startsWith(wanted[0], ignoreCase = true)) continue
+            val rest = words.drop(i).joinToString(" ").lowercase()
+            var position = 0
+            val found = wanted.all { letter ->
+                val at = rest.indexOf(letter, position)
+                position = at + 1
+                at >= 0
+            }
+            if (found) return true
+        }
+        return false
+    }
+
     /** Turns " (inner)" into ", inner," so the voice pauses as it would for brackets. */
     private fun commas(inner: String, following: String): String =
         if (following.isEmpty()) ", $inner," else ", $inner$following"
@@ -111,6 +147,20 @@ object Cleanup {
         Rule("Leftover punctuation", "\\(\\s*[;,:]+\\s*") { "(" },
         Rule("Leftover punctuation", "\\s*[;,:]+\\s*\\)") { ")" },
         Rule("Empty brackets", " ?\\(\\s*\\)") { "" },
+
+        // "World Health Organization (WHO)" -> "World Health Organization, abbreviated to WHO,".
+        Rule(
+            "Abbreviation in brackets",
+            " ?\\(([A-Za-z][A-Za-z0-9&.-]{1,9})\\)([.,;:!?)]?)",
+            context = { m, text ->
+                val token = m.groupValues[1]
+                if (isAbbreviationOf(text.substring(0, m.range.first), token)) {
+                    commas("abbreviated to $token", m.groupValues[2])
+                } else {
+                    null
+                }
+            },
+        ),
 
         Rule("Minus sign", "(?<![\\w.])−(?=\\d)") { "minus " },
 

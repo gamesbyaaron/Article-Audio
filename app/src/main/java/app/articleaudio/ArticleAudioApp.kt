@@ -15,6 +15,7 @@ class ArticleAudioApp : Application() {
             previous?.uncaughtException(thread, error)
         }
 
+        Prefs.init(this)
         Reader.init(this)
 
         DebugLog.i(
