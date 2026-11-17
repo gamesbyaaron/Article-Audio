@@ -66,6 +66,28 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.Surface
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import java.text.DateFormat
 import java.util.Date
 
@@ -105,6 +127,7 @@ class MainActivity : ComponentActivity() {
         DebugLog.i("Received shared text: ${text.take(200)}")
         Reader.linkInput = text
         Reader.fetch(text)
+        Nav.screen = "player"
     }
 }
 
@@ -121,130 +144,341 @@ private fun AppTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = colors, content = content)
 }
 
+/** Which screen is showing. Kept outside the screens so turning the phone keeps it. */
+object Nav {
+    var screen by mutableStateOf("library")
+}
+
 @Composable
 private fun App(onPlay: () -> Unit) {
-    var screen by rememberSaveable { mutableStateOf("home") }
-    val home = { screen = "home" }
-    if (screen != "home") BackHandler(onBack = home)
+    val screen = Nav.screen
+    val back = {
+        Nav.screen = when (screen) {
+            "text", "changes" -> "player"
+            "log" -> "settings"
+            else -> "library"
+        }
+    }
+    if (screen != "library") BackHandler(onBack = back)
     when (screen) {
-        "log" -> LogScreen(onBack = home)
-        "text" -> TextScreen(onBack = home, onPlay = onPlay)
-        "changes" -> ChangesScreen(onBack = home)
-        "settings" -> SettingsScreen(onBack = home)
-        else -> HomeScreen(onOpen = { screen = it }, onPlay = onPlay)
+        "player" -> PlayerScreen(onBack = back, onPlay = onPlay)
+        "text" -> TextScreen(onBack = back, onPlay = onPlay)
+        "changes" -> ChangesScreen(onBack = back)
+        "settings" -> SettingsScreen(onBack = back)
+        "log" -> LogScreen(onBack = back)
+        else -> LibraryScreen(onPlay = onPlay)
     }
 }
 
+@Composable
+private fun AppIcon(id: Int, description: String?, modifier: Modifier = Modifier) {
+    Icon(painterResource(id), contentDescription = description, modifier = modifier)
+}
+
+// ---- Library (home) ---------------------------------------------------------------------
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomeScreen(onOpen: (String) -> Unit, onPlay: () -> Unit) {
-    val clipboard = LocalClipboardManager.current
+private fun LibraryScreen(onPlay: () -> Unit) {
+    var adding by remember { mutableStateOf(false) }
+    val entries = Library.entries
+    val open = Reader.entry
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Article Audio") },
                 actions = {
-                    TextButton(onClick = { onOpen("settings") }) { Text("Settings") }
-                    TextButton(onClick = { onOpen("log") }) { Text("Log") }
+                    IconButton(onClick = { Nav.screen = "settings" }) { AppIcon(R.drawable.ic_settings, "Settings") }
                 },
             )
         },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { adding = true },
+                icon = { AppIcon(R.drawable.ic_add, null) },
+                text = { Text("Add article") },
+            )
+        },
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .imePadding()
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
+        LazyColumn(
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Version ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
-
-            OutlinedTextField(
-                value = Reader.linkInput,
-                onValueChange = { Reader.linkInput = it },
-                label = { Text("Wikipedia link") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { Reader.fetch(Reader.linkInput) },
-                    enabled = !Reader.loading,
-                ) { Text("Fetch") }
-                OutlinedButton(
-                    onClick = {
-                        val pasted = clipboard.getText()?.text.orEmpty()
-                        Reader.linkInput = pasted
-                        Reader.fetch(pasted)
-                    },
-                    enabled = !Reader.loading,
-                ) { Text("Paste and fetch") }
+            if (Reader.loading || (Reader.message.isNotEmpty() && Reader.messageIsError)) {
+                item { StatusLine() }
             }
+            if (open != null && Reader.article != null) {
+                item { ContinueCard(open, onPlay) }
+            }
+            if (entries.isEmpty()) {
+                item { EmptyLibrary() }
+            } else {
+                item {
+                    Text(
+                        "Library",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                items(entries.size, key = { entries[it].id }) { i -> LibraryCard(entries[i]) }
+            }
+        }
+    }
 
-            if (Reader.message.isNotEmpty()) {
+    if (adding) AddArticleDialog(onDismiss = { adding = false })
+}
+
+/** Fetching progress, or the last error. */
+@Composable
+private fun StatusLine() {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (Reader.loading) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        Text(
+            Reader.message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (Reader.messageIsError) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun EmptyLibrary() {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp, horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Nothing here yet", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Share an article to Article Audio from the Wikipedia app or your browser, " +
+                "or tap Add article and paste a link. Everything you open is saved here and works without internet.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** The article that is open, with a play button, at the top of the library. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ContinueCard(entry: LibraryEntry, onPlay: () -> Unit) {
+    val saved = Library.entries.firstOrNull { it.id == entry.id } ?: entry
+    val article = Reader.article ?: return
+    val fraction = if (Reader.audioMode) Reader.audioPositionMs.toFloat() / maxOf(1, Reader.audioDurationMs)
+    else article.startChars[Reader.index.coerceIn(0, article.sentences.size - 1)].toFloat() / maxOf(1, article.totalChars)
+
+    ElevatedCard(
+        onClick = { Nav.screen = "player" },
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    Reader.message,
-                    color = if (Reader.messageIsError) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (Reader.playing) "Now playing" else "Continue listening",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    saved.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                LinearProgressIndicator(progress = { fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+            }
+            FilledIconButton(
+                onClick = { if (Reader.playing) Reader.pause() else onPlay() },
+                modifier = Modifier.size(56.dp),
+            ) {
+                AppIcon(
+                    if (Reader.playing) R.drawable.ic_pause else R.drawable.ic_play,
+                    if (Reader.playing) "Pause" else "Play",
                 )
             }
-
-            val article = Reader.article
-            val entry = Reader.entry
-            if (article != null && entry != null) ArticlePlayer(article, entry, onOpen, onPlay)
-
-            LibraryList()
         }
     }
 }
 
-/** Saved articles, most recently opened first. Tap one to open it where it was left. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LibraryList() {
-    val entries = Library.entries
-    Text("Library", style = MaterialTheme.typography.titleMedium)
-    if (entries.isEmpty()) {
-        Text(
-            "Articles you fetch are saved here and can be opened without internet.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
-    for (entry in entries) {
-        val open = Reader.entry?.id == entry.id
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(enabled = !Reader.loading) { Reader.open(entry.id) }
-                .padding(vertical = 6.dp),
-        ) {
-            Text(
-                entry.name,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (open) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+private fun LibraryCard(entry: LibraryEntry) {
+    OutlinedCard(
+        onClick = {
+            Reader.open(entry.id)
+            Nav.screen = "player"
+        },
+        enabled = !Reader.loading,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(entry.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            LinearProgressIndicator(
+                progress = { entry.percent / 100f },
+                modifier = Modifier.fillMaxWidth(),
             )
-            val progress = if (entry.position == 0) "Not started" else "${entry.percent}% read"
-            val audio = if (entry.hasAudio) " · audio downloaded" else ""
-            Text(
-                "$progress · about ${maxOf(1, entry.chars / 900)} min · fetched ${day(entry.fetchedAt)}$audio",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val progress = when {
+                    entry.position == 0 -> "Not started"
+                    entry.percent >= 100 -> "Finished"
+                    else -> "${entry.percent}%"
+                }
+                Text(
+                    "$progress · ${maxOf(1, entry.chars / 900)} min · ${day(entry.fetchedAt)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (entry.hasAudio) {
+                    AppIcon(R.drawable.ic_download, "Audio downloaded", Modifier.size(16.dp))
+                }
+            }
         }
     }
+}
+
+/** Paste a link and fetch it. */
+@Composable
+private fun AddArticleDialog(onDismiss: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    var link by remember { mutableStateOf("") }
+    val fetch = { text: String ->
+        Reader.linkInput = text
+        Reader.fetch(text)
+        onDismiss()
+        Nav.screen = "player"
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add article") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Paste a link to an English Wikipedia article.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = link,
+                    onValueChange = { link = it },
+                    label = { Text("Wikipedia link") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(onClick = { fetch(clipboard.getText()?.text.orEmpty()) }) { Text("Paste from clipboard and add") }
+            }
+        },
+        confirmButton = { TextButton(onClick = { fetch(link) }, enabled = link.isNotBlank()) { Text("Add") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 private fun day(time: Long): String = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(time))
 
+// ---- Player -----------------------------------------------------------------------------
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ArticlePlayer(article: Article, entry: LibraryEntry, onOpen: (String) -> Unit, onPlay: () -> Unit) {
+private fun PlayerScreen(onBack: () -> Unit, onPlay: () -> Unit) {
+    val article = Reader.article
+    val entry = Reader.entry
+    val saved = entry?.let { e -> Library.entries.firstOrNull { it.id == e.id } ?: e }
+    var menu by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {},
+                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
+                actions = {
+                    if (article != null && saved != null) {
+                        IconButton(onClick = { Nav.screen = "text" }) { AppIcon(R.drawable.ic_text, "Full text") }
+                        Box {
+                            IconButton(onClick = { menu = true }) { AppIcon(R.drawable.ic_more, "More") }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Open on Wikipedia") },
+                                    onClick = { menu = false; openOriginal(context, saved.title) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Cleanup changes (${article.changes.size})") },
+                                    onClick = { menu = false; Nav.screen = "changes" },
+                                )
+                                DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; renaming = true })
+                                DropdownMenuItem(
+                                    text = { Text("Refresh from Wikipedia") },
+                                    onClick = { menu = false; Reader.refresh() },
+                                )
+                                DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; deleting = true })
+                            }
+                        }
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        if (article == null || saved == null) {
+            Column(
+                modifier = Modifier.padding(padding).fillMaxSize().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                if (Reader.loading) CircularProgressIndicator()
+                Text(
+                    Reader.message.ifEmpty { "No article open." },
+                    modifier = Modifier.padding(top = 16.dp),
+                    textAlign = TextAlign.Center,
+                    color = if (Reader.messageIsError) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            PlayerBody(article, saved, onPlay, Modifier.padding(padding))
+        }
+    }
+
+    if (renaming && saved != null) RenameDialog(saved, onDone = { renaming = false })
+    if (deleting && saved != null) {
+        AlertDialog(
+            onDismissRequest = { deleting = false },
+            title = { Text("Delete \"${saved.name}\"?") },
+            text = {
+                Text(
+                    "This removes the article, your place in it and its downloaded audio from the app. " +
+                        "A copy of the audio in your Music folder is not touched."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleting = false
+                    Reader.close()
+                    Library.delete(saved.id)
+                    Nav.screen = "library"
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlayerBody(article: Article, saved: LibraryEntry, onPlay: () -> Unit, modifier: Modifier) {
     val index = Reader.index.coerceIn(0, article.sentences.size - 1)
     val current = article.sentences[index]
     val speed = Reader.speed
     val audio = Reader.audioMode
-    // The library list has the up-to-date name and whether a download exists.
-    val saved = Library.entries.firstOrNull { it.id == entry.id } ?: entry
     var dragging by remember { mutableStateOf<Float?>(null) }
 
     // Live reading has no audio file behind it, so its times are worked out from the text
@@ -256,32 +490,35 @@ private fun ArticlePlayer(article: Article, entry: LibraryEntry, onOpen: (String
     val fraction = if (audio) Reader.audioPositionMs.toFloat() / maxOf(1, Reader.audioDurationMs)
     else article.startChars[index].toFloat() / totalChars
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    Column(
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(saved.name, style = MaterialTheme.typography.headlineSmall)
+        if (Reader.message.isNotEmpty()) StatusLine()
+
+        if (saved.hasAudio) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !audio, onClick = { Reader.useAudio(false) }, label = { Text("Read live") })
+                FilterChip(selected = audio, onClick = { Reader.useAudio(true) }, label = { Text("Downloaded audio") })
+            }
+        }
+
+        // The sentence being read, large, like a caption.
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp).clickable { Nav.screen = "text" },
         ) {
-            Text(saved.name, style = MaterialTheme.typography.titleLarge)
-            if (saved.hasAudio) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (audio) {
-                        OutlinedButton(onClick = { Reader.useAudio(false) }) { Text("Read live") }
-                        Button(onClick = {}) { Text("Play download") }
-                    } else {
-                        Button(onClick = {}) { Text("Read live") }
-                        OutlinedButton(onClick = { Reader.useAudio(true) }) { Text("Play download") }
-                    }
-                }
-            }
-            if (audio) {
-                Text("Playing the downloaded audio file.", style = MaterialTheme.typography.bodyLarge)
-            } else {
-                Text(
-                    current.text,
-                    style = if (current.isHeading) MaterialTheme.typography.titleMedium
-                    else MaterialTheme.typography.bodyLarge,
-                )
-            }
+            Text(
+                if (audio) "Playing the downloaded audio file." else current.text,
+                style = if (current.isHeading && !audio) MaterialTheme.typography.titleLarge
+                else MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Serif, lineHeight = 28.sp),
+                modifier = Modifier.padding(20.dp),
+            )
+        }
+
+        Column {
             Slider(
                 value = (dragging ?: fraction).coerceIn(0f, 1f),
                 onValueChange = { dragging = it },
@@ -300,89 +537,78 @@ private fun ArticlePlayer(article: Article, entry: LibraryEntry, onOpen: (String
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = { Reader.changeSpeed(nextSpeed(speed)) }) {
+                Text("${trimSpeed(speed)}×", style = MaterialTheme.typography.titleMedium)
+            }
+            SkipButton(R.drawable.ic_replay, "Back 15 seconds") { Reader.skipSeconds(-15) }
+            FilledIconButton(
+                onClick = { if (Reader.playing) Reader.pause() else onPlay() },
+                modifier = Modifier.size(80.dp),
             ) {
-                OutlinedButton(onClick = { Reader.skipSeconds(-15) }) { Text("−15s") }
-                Button(onClick = { if (Reader.playing) Reader.pause() else onPlay() }) {
-                    Text(if (Reader.playing) "Pause" else "Play")
-                }
-                OutlinedButton(onClick = { Reader.skipSeconds(15) }) { Text("+15s") }
-                TextButton(onClick = { Reader.changeSpeed(nextSpeed(speed)) }) { Text("${trimSpeed(speed)}×") }
+                AppIcon(
+                    if (Reader.playing) R.drawable.ic_pause else R.drawable.ic_play,
+                    if (Reader.playing) "Pause" else "Play",
+                    Modifier.size(40.dp),
+                )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onOpen("text") }) { Text("Full text") }
-                OutlinedButton(onClick = { onOpen("changes") }) { Text("Changes (${article.changes.size})") }
-            }
-            TextButton(onClick = { Reader.stop() }) { Text("Stop and go to start") }
-            DownloadSection(article)
-            ArticleOptions(saved)
+            SkipButton(R.drawable.ic_forward, "Forward 15 seconds") { Reader.skipSeconds(15) }
+            TextButton(onClick = { Reader.stop() }) { Text("Restart") }
+        }
+
+        HorizontalDivider()
+        DownloadSection(article)
+
+        Text(
+            "Text from the Wikipedia article \"${saved.title}\", licensed CC BY-SA 4.0. " +
+                "Adapted for listening. Fetched ${day(saved.fetchedAt)}.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 24.dp),
+        )
+    }
+}
+
+/** A circular-arrow icon with "15" under it. */
+@Composable
+private fun SkipButton(icon: Int, description: String, onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(56.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            AppIcon(icon, description, Modifier.size(28.dp))
+            Text("15", style = MaterialTheme.typography.labelSmall)
         }
     }
 }
 
-/** Where the text came from, and rename, refresh and delete for the open article. */
 @Composable
-private fun ArticleOptions(entry: LibraryEntry) {
-    val context = LocalContext.current
-    var renaming by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf(false) }
+private fun RenameDialog(entry: LibraryEntry, onDone: () -> Unit) {
     var newName by remember(entry.id) { mutableStateOf(entry.name) }
-
-    Text(
-        "Text from the Wikipedia article \"${entry.title}\", licensed CC BY-SA 4.0. " +
-            "Adapted for listening. Fetched ${day(entry.fetchedAt)}.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("Rename") },
+        text = { OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true) },
+        confirmButton = {
+            TextButton(onClick = {
+                Library.rename(entry.id, newName)
+                onDone()
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDone) { Text("Cancel") } },
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        TextButton(onClick = {
-            val url = "https://en.wikipedia.org/wiki/" + Uri.encode(entry.title.replace(' ', '_'))
-            try {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            } catch (t: Throwable) {
-                DebugLog.e("Could not open the original article", t)
-            }
-        }) { Text("Original") }
-        TextButton(onClick = { newName = entry.name; renaming = true }) { Text("Rename") }
-        TextButton(onClick = { Reader.refresh() }, enabled = !Reader.loading) { Text("Refresh") }
-        TextButton(onClick = { deleting = true }) { Text("Delete") }
-    }
+}
 
-    if (renaming) {
-        AlertDialog(
-            onDismissRequest = { renaming = false },
-            title = { Text("Rename") },
-            text = { OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true) },
-            confirmButton = {
-                TextButton(onClick = {
-                    Library.rename(entry.id, newName)
-                    renaming = false
-                }) { Text("Save") }
-            },
-            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
-        )
-    }
-    if (deleting) {
-        AlertDialog(
-            onDismissRequest = { deleting = false },
-            title = { Text("Delete \"${entry.name}\"?") },
-            text = {
-                Text(
-                    "This removes the article, your place in it and its downloaded audio from the app. " +
-                        "A copy of the audio in your Music folder is not touched."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    deleting = false
-                    Reader.close()
-                    Library.delete(entry.id)
-                }) { Text("Delete") }
-            },
-            dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } },
-        )
+private fun openOriginal(context: Context, title: String) {
+    val url = "https://en.wikipedia.org/wiki/" + Uri.encode(title.replace(' ', '_'))
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    } catch (t: Throwable) {
+        DebugLog.e("Could not open the original article", t)
     }
 }
 
@@ -391,27 +617,33 @@ private fun ArticleOptions(entry: LibraryEntry) {
 private fun DownloadSection(article: Article) {
     val context = LocalContext.current
     val mine = Exporter.title == article.title
-    when {
-        Exporter.running -> {
-            Text(
-                "Making audio of \"${Exporter.title}\": ${(Exporter.progress * 100).toInt()}%",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            LinearProgressIndicator(progress = { Exporter.progress }, modifier = Modifier.fillMaxWidth())
-            TextButton(onClick = { Exporter.cancel() }) { Text("Cancel download") }
-        }
-        else -> {
-            OutlinedButton(onClick = { Exporter.start(article) }) { Text("Download audio") }
-            if (mine && Exporter.error.isNotEmpty()) {
-                Text(Exporter.error, color = MaterialTheme.colorScheme.error)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        when {
+            Exporter.running -> {
+                Text(
+                    "Making audio of \"${Exporter.title}\": ${(Exporter.progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                LinearProgressIndicator(progress = { Exporter.progress }, modifier = Modifier.fillMaxWidth())
+                TextButton(onClick = { Exporter.cancel() }) { Text("Cancel download") }
             }
-            if (mine && Exporter.savedAs.isNotEmpty()) {
-                Text("Saved to ${Exporter.savedAs}", style = MaterialTheme.typography.bodySmall)
-                val uri = Exporter.savedUri
-                if (uri != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { sendAudio(context, uri, Intent.ACTION_SEND) }) { Text("Share") }
-                        OutlinedButton(onClick = { sendAudio(context, uri, Intent.ACTION_VIEW) }) { Text("Open") }
+            else -> {
+                OutlinedButton(onClick = { Exporter.start(article) }) {
+                    AppIcon(R.drawable.ic_download, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Download audio")
+                }
+                if (mine && Exporter.error.isNotEmpty()) {
+                    Text(Exporter.error, color = MaterialTheme.colorScheme.error)
+                }
+                if (mine && Exporter.savedAs.isNotEmpty()) {
+                    Text("Saved to ${Exporter.savedAs}", style = MaterialTheme.typography.bodySmall)
+                    val uri = Exporter.savedUri
+                    if (uri != null) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { sendAudio(context, uri, Intent.ACTION_SEND) }) { Text("Share") }
+                            TextButton(onClick = { sendAudio(context, uri, Intent.ACTION_VIEW) }) { Text("Open in another app") }
+                        }
                     }
                 }
             }
@@ -464,8 +696,8 @@ private fun TextScreen(onBack: () -> Unit, onPlay: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(article?.title ?: "Full text", maxLines = 1) },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
+                title = { Text(article?.title ?: "Full text", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
                 actions = {
                     if (article != null) {
                         TextButton(onClick = { if (Reader.playing) Reader.pause() else onPlay() }) {
@@ -482,8 +714,8 @@ private fun TextScreen(onBack: () -> Unit, onPlay: () -> Unit) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.padding(padding).fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 items(article.chunks.size) { i -> ChunkText(article, i) }
             }
@@ -510,7 +742,8 @@ private fun ChunkText(article: Article, chunkIndex: Int) {
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     Text(
         text,
-        style = if (chunk.isHeading) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
+        style = if (chunk.isHeading) MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
+        else MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Serif, fontSize = 18.sp, lineHeight = 30.sp),
         onTextLayout = { layout = it },
         modifier = Modifier
             .fillMaxWidth()
@@ -535,7 +768,7 @@ private fun ChangesScreen(onBack: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text("Cleanup changes (${changes.size})") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
+                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
                 actions = {
                     TextButton(onClick = {
                         val all = changes.joinToString("\n") { "${it.rule}: ${it.before}  ->  ${it.after}" }
@@ -584,7 +817,7 @@ private fun SettingsScreen(onBack: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
+                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
             )
         },
     ) { padding ->
@@ -620,6 +853,16 @@ private fun SettingsScreen(onBack: () -> Unit) {
             }
             if (Reader.message.isNotEmpty() && Reader.messageIsError) {
                 item { Text(Reader.message, color = MaterialTheme.colorScheme.error) }
+            }
+            item {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+                Text("Developer", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Version ${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+                OutlinedButton(onClick = { Nav.screen = "log" }) { Text("Debug log") }
             }
         }
     }
@@ -658,7 +901,7 @@ private fun LogScreen(onBack: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text("Debug log") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
+                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
                 actions = {
                     TextButton(onClick = {
                         DebugLog.i("Test crash pressed")
