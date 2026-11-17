@@ -199,6 +199,27 @@ Owner installed step 4a (build 9); detailed feedback still to come. Owner's deci
 Player and voice names (owner's requests, 17 November 2026): built, waiting for the owner to test.
 - Home screen player: a draggable progress bar over the whole article with elapsed and total time, −15s and +15s buttons (also used by the lock-screen back/next), Play/Pause, and a speed button that steps through 0.75× to 2.5×. Times are estimates from text length (Reader.CHARS_PER_SECOND = 15 at 1×), because live reading has no audio file; jumps land on the start of a sentence.
 - Voices are listed as "English (United States) · Voice 3 · male" (VoiceNames.kt). Android does not report gender, so male/female comes from a table of Google voice codes written from memory; it may be wrong and is omitted for unknown voices.
+Owner confirmed builds 9 and 11 work well (background listening, player, voice names).
+
+Step 4b (download as an audio file): built, waiting for the owner to test on the phone.
+Done:
+- "Download audio" button on the player card. Exporter.kt opens its own speech engine connection (so live reading is not disturbed), uses the saved voice and speed, has the engine write each paragraph to a WAV file in the cache (synthesizeToFile), streams it into AacWriter.kt (MediaCodec AAC-LC, 64 kbps per channel, MediaMuxer .m4a) and deletes the WAV. Nothing long is held in memory. 0.7 s of silence follows headings and 0.25 s follows paragraphs. A spoken credit ends the file: title, "from Wikipedia", and the licence.
+- The finished file is kept in the app's own storage (files/downloads/<title>.m4a, for the library step to play) and, on Android 10+, copied to the shared folder Music/Article Audio through MediaStore, where the Files app and music players can see it. Share and Open buttons use that copy. On Android 9 and older there is no shared copy.
+- ExportService.kt: foreground service (type dataSync) with a progress notification and Cancel, a wake lock, and a final "Audio ready" or failure notification.
+- Logged: start, voice and speed, sound format, finish with file size, audio length and time taken, cancel, and any failure with its stack trace.
+- Unit tests: WavTest (5) for the WAV header reader and file names. The encoder and service cannot be unit tested.
+Owner should test on the phone:
+- Download a short article first. Watch the progress on the card and in the notification, then Open the file and listen: voice, speed, pauses, the credit at the end.
+- Find the file in the Files app or a music player under Music/Article Audio. Try Share.
+- Download a long article with the phone locked. Try Cancel part-way through another.
+- Listen live to one article while another downloads.
+- Paste the Log either way: it records how long the download took.
+Open:
+- Never run on a phone: speech-to-file and the encoder are the riskiest parts of the project. Expect fixes.
+- Only 16-bit PCM from the speech engine is handled; anything else fails with a clear message.
+- Downloading the same article twice makes a second shared copy with a number added by Android.
+- No list of past downloads yet; that is the library step.
+
+Pinned for later, not in the development order (owner, 17 November 2026): the long-term goal is a public app for others as well as the owner. That means finding articles inside the app (search, featured, most-read, random) on top of the saved library, and a release (name and icon without "Wikipedia", private signing key, attribution and Wikimedia API terms, Google Play). Do not start any of this until the owner asks, but keep choices release-friendly: attribution on every article, no accounts or tracking, cope with phones that have poor or no voices.
 Next:
-- 4b: download an article as an .m4a audio file (uses the same foreground service as 4a).
-- 4c: library (saved articles, resume position, rename, delete) and attribution.
+- 4c: library. Saved articles that play offline, resume position per article saved automatically to the sentence, progress shown in the list, rename, delete, a Refresh that re-fetches and resets the place, and attribution on every article. Each article shows whether it has a downloaded file; the app must then also play downloaded files itself (same player controls and lock-screen controls, exact times) and remember the position in them too (owner's request).

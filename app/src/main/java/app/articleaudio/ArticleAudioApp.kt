@@ -17,6 +17,7 @@ class ArticleAudioApp : Application() {
 
         Prefs.init(this)
         Reader.init(this)
+        Exporter.init(this)
 
         DebugLog.i(
             "App started: version ${BuildConfig.VERSION_NAME}, " +
