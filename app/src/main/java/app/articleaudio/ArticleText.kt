@@ -17,6 +17,23 @@ class Article(
     val sentences: List<Sentence>,
     val changes: List<Change>,
 ) {
+    /** For each sentence, how many characters of the article come before it. */
+    val startChars: IntArray by lazy {
+        var total = 0
+        IntArray(sentences.size) { i -> total.also { total += sentences[i].text.length } }
+    }
+
+    val totalChars: Int by lazy { sentences.sumOf { it.text.length } }
+
+    /** The sentence being read once [chars] characters of the article have been spoken. */
+    fun sentenceAtChar(chars: Int): Int {
+        var found = 0
+        for (i in sentences.indices) {
+            if (startChars[i] <= chars) found = i else break
+        }
+        return found
+    }
+
     /** The sentence that contains character [offset] of chunk [chunk]. */
     fun sentenceAt(chunk: Int, offset: Int): Int {
         val c = chunks[chunk]

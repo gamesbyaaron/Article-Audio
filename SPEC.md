@@ -194,6 +194,11 @@ Open:
 - Not run on a phone yet; only compiled and unit tested by CI.
 - Voice names are the engine's own codes (for example en-us-x-iom-local); there is no friendlier name available.
 - Some phone makers' battery savers stop background apps regardless; if reading stops with the screen off, the Log will show whether the service ended.
+Owner installed step 4a (build 9); detailed feedback still to come. Owner's decision: bracketed date ranges stay as they are (", 1920 to 1987,") for now.
+
+Player and voice names (owner's requests, 17 November 2026): built, waiting for the owner to test.
+- Home screen player: a draggable progress bar over the whole article with elapsed and total time, −15s and +15s buttons (also used by the lock-screen back/next), Play/Pause, and a speed button that steps through 0.75× to 2.5×. Times are estimates from text length (Reader.CHARS_PER_SECOND = 15 at 1×), because live reading has no audio file; jumps land on the start of a sentence.
+- Voices are listed as "English (United States) · Voice 3 · male" (VoiceNames.kt). Android does not report gender, so male/female comes from a table of Google voice codes written from memory; it may be wrong and is omitted for unknown voices.
 Next:
 - 4b: download an article as an .m4a audio file (uses the same foreground service as 4a).
 - 4c: library (saved articles, resume position, rename, delete) and attribution.

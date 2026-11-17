@@ -103,8 +103,14 @@ class Speaker(context: Context, private val listener: Listener) {
                 it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true
         }
         val english = offline.filter { it.locale.language == "en" }
+        val counters = mutableMapOf<String, Int>()
         return english.ifEmpty { offline }
             .sortedWith(compareBy({ it.locale.displayName }, { it.name }))
-            .map { VoiceOption(it.name, it.locale.displayName) }
+            .map {
+                val accent = it.locale.displayName
+                val number = (counters[accent] ?: 0) + 1
+                counters[accent] = number
+                VoiceOption(it.name, VoiceNames.label(accent, number, it.name))
+            }
     }
 }
