@@ -294,7 +294,7 @@ Build B (Home, tabs, article page): built, merged on a passing build at the owne
 - Library tab: filters All, In progress, Finished, Downloaded. A "finished" flag is now saved when an article is heard to the end.
 - Player: a Sound button (background sound and volume, the same setting as in Settings) joins Speed, Sleep and Sections; Restart moved to the ⋮ menu.
 - Sharing a link or pasting one still opens the player directly.
-- Unit tests: HomeFeedTitleTest (2).
+- Unit tests: FeedTitlesTest (2).
 Open:
 - Not run on a phone; the daily feed has never been fetched from here (no access to Wikipedia from the build machine).
 - Library vs saved: the owner may change this later.

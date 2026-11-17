@@ -61,7 +61,7 @@ object HomeFeed {
                 val feed = WikipediaClient.fetchFeed(today) ?: WikipediaClient.fetchFeed(day(-1))
                     ?: throw WikipediaClient.FetchException("Wikipedia's daily feed is not available")
                 val (tfa, mostRead) = feed
-                val wanted = listOfNotNull(tfa) + mostRead.filter { isArticleTitle(it) && it != tfa }.take(20)
+                val wanted = listOfNotNull(tfa) + mostRead.filter { FeedTitles.isArticle(it) && it != tfa }.take(20)
                 // The feed's own pictures may be non-free, so ask again for free-licensed ones only.
                 val details = WikipediaClient.details(wanted)
                 val f = tfa?.let { details[it] ?: WikipediaClient.SearchResult(it, "", null) }
@@ -82,13 +82,6 @@ object HomeFeed {
                 }
             }
         }
-    }
-
-    /** Leaves out the Main Page and special or maintenance pages that appear in the most-read list. */
-    fun isArticleTitle(title: String): Boolean {
-        if (title == "Main Page") return false
-        val prefix = title.substringBefore(':', "")
-        return prefix !in setOf("Special", "Wikipedia", "File", "Portal", "Help", "Template", "Category", "Talk", "User")
     }
 
     /** The date in UTC, as Wikipedia's feed uses: "2026/11/17". */
