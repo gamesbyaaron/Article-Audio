@@ -298,7 +298,7 @@ object Reader : Speaker.Listener {
             try {
                 val fetched = WikipediaClient.fetchPlainText(requested)
                 val built = ArticleText.build(fetched.title, fetched.text, maxChars)
-                val saved = Library.save(fetched.title, fetched.text, built.sentences.size, resetPosition)
+                val saved = Library.save(fetched.title, fetched.text, built.sentences.size, resetPosition, fetched.description)
                 if (!saved.imageChecked) thread(name = "picture") { fetchPicture(saved) }
                 val ms = System.currentTimeMillis() - started
                 main.post {
@@ -407,7 +407,7 @@ object Reader : Speaker.Listener {
         }
         thread(name = "save") {
             val saved = Library.find(Wav.fileName(a.title))
-                ?: Library.save(a.title, p.text, a.sentences.size, resetPosition = false)
+                ?: Library.save(a.title, p.text, a.sentences.size, resetPosition = false, description = p.description)
             if (!saved.imageChecked) thread(name = "picture") { fetchPicture(saved) }
             main.post {
                 if (download) {

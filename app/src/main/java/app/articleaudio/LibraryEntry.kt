@@ -24,7 +24,12 @@ data class LibraryEntry(
     val imageChecked: Boolean = false,
     /** True once the article has been listened to the end. */
     val finished: Boolean = false,
+    /** Wikipedia's short description, such as "2024 video game". */
+    val description: String = "",
 ) {
+    /** Which generic icon to show when there is no free picture. */
+    val category: String get() = Category.of(description, title)
+
     val percent: Int get() = if (sentences <= 1) 0 else (position * 100 / (sentences - 1)).coerceIn(0, 100)
 
     fun toProperties(): Properties = Properties().apply {
@@ -39,6 +44,7 @@ data class LibraryEntry(
         setProperty("imageCredit", imageCredit)
         setProperty("imageChecked", imageChecked.toString())
         setProperty("finished", finished.toString())
+        setProperty("description", description)
     }
 
     companion object {
@@ -60,6 +66,7 @@ data class LibraryEntry(
                 imageCredit = p.getProperty("imageCredit") ?: "",
                 imageChecked = p.getProperty("imageChecked") == "true",
                 finished = p.getProperty("finished") == "true",
+                description = p.getProperty("description") ?: "",
             )
         }
     }

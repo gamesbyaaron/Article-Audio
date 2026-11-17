@@ -299,3 +299,12 @@ Open:
 - Not run on a phone; the daily feed has never been fetched from here (no access to Wikipedia from the build machine).
 - Library vs saved: the owner may change this later.
 
+Owner confirmed build B (build 23) looks good, but Popular reads was empty.
+
+Icons, topic pictures, Popular reads fix (owner, 17 November 2026): built, merged on a passing build at the owner's request, waiting for the owner to test.
+- Pictures everywhere: Wikipedia's own picture if free-licensed; otherwise a generic icon for the kind of article (Category.kt) on a tinted square. The kind comes from the article's short description, using the head of the phrase (words before "by", "of", "in"...) and the last keyword in it ("American film director" is a person, "2019 song by American singer" is music), then the title if there is no description. Icons: game, war, person, place, nature, animal, film, music, book, sport, space, science, history, building, and a plain article icon. They are vector drawables in res/drawable/ic_cat_*.xml based on Material Design icon shapes.
+- Descriptions are now fetched with the article text and stored in the library; articles saved earlier fall back to their title.
+- Suggested topic tiles show a free picture from one of the topic's first articles (looked up once a day with the feed), with the name on a dark band; topics without one show the topic's own icon (HomeFeed.Topic has a category).
+- Popular reads was empty because, early in the UTC day, today's feed has the featured article but no most-read list yet, and that half-filled day was saved as done. Now the most-read list falls back to yesterday's feed, a day is only marked done when both parts are present, and Home can be pulled down to refresh.
+- Unit tests: CategoryTest (20).
+

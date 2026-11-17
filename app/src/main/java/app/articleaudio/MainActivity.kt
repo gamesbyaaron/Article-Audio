@@ -108,6 +108,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import java.text.DateFormat
 import java.util.Date
 
@@ -279,8 +280,13 @@ private fun HomeScreen(onPlay: () -> Unit) {
             )
         },
     ) { padding ->
-        LazyColumn(
+        PullToRefreshBox(
+            isRefreshing = HomeFeed.loading,
+            onRefresh = { HomeFeed.refresh(force = true) },
             modifier = Modifier.padding(padding).fillMaxSize(),
+        ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 8.dp),
         ) {
             item {
@@ -339,7 +345,7 @@ private fun HomeScreen(onPlay: () -> Unit) {
                 val popular = HomeFeed.popular
                 if (popular.isEmpty()) {
                     Text(
-                        if (HomeFeed.loading) "Loading…" else "Nothing to show yet.",
+                        if (HomeFeed.loading) "Loading…" else "Nothing to show yet. Pull down to try again.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp),
                     )
@@ -354,6 +360,7 @@ private fun HomeScreen(onPlay: () -> Unit) {
                 Spacer(Modifier.height(16.dp))
             }
         }
+        }
     }
 }
 
@@ -362,10 +369,11 @@ private fun HomeScreen(onPlay: () -> Unit) {
 private fun ResultPicture(result: WikipediaClient.SearchResult, size: androidx.compose.ui.unit.Dp) {
     val saved = Library.entries.firstOrNull { it.title == result.title }
     val url = result.thumbnail
+    val category = Category.of(result.description, result.title)
     when {
-        url != null -> ArticlePicture({ Pictures.fromUrl(url) }, url, size)
+        url != null -> ArticlePicture({ Pictures.fromUrl(url) }, url, size, category = category)
         saved != null -> EntryPicture(saved, size)
-        else -> ArticlePicture({ null }, result.title, size)
+        else -> ArticlePicture({ null }, result.title, size, category = category)
     }
 }
 
@@ -444,29 +452,34 @@ private fun ContinueTile(entry: LibraryEntry, onPlay: () -> Unit) {
     }
 }
 
-/** A coloured square with a topic's name. Tap to see articles about it. */
+/** A square topic tile: a picture from one of its articles (or the topic's icon) with its name. */
 @Composable
 private fun TopicTile(i: Int) {
-    val (label, query) = HomeFeed.TOPICS[i]
-    val colors = listOf(
-        MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer,
-        MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer,
-        MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer,
-    )
-    val (background, foreground) = colors[i % colors.size]
+    val topic = HomeFeed.TOPICS[i]
+    val url = HomeFeed.topicPictures[topic.label]
     Box(
         modifier = Modifier
             .size(110.dp)
             .clip(MaterialTheme.shapes.medium)
-            .background(background)
             .clickable {
-                Nav.topic = label to query
+                Nav.topic = topic.label to topic.query
                 Nav.screen = "topic"
-            }
-            .padding(10.dp),
+            },
         contentAlignment = Alignment.BottomStart,
     ) {
-        Text(label, style = MaterialTheme.typography.titleSmall, color = foreground)
+        if (url != null) ArticlePicture({ Pictures.fromUrl(url) }, url, 110.dp, category = topic.category)
+        else ArticlePicture({ null }, topic.label, 110.dp, category = topic.category)
+        // The name on a dark band so it reads over any picture.
+        Text(
+            topic.label,
+            style = MaterialTheme.typography.titleSmall,
+            color = androidx.compose.ui.graphics.Color.White,
+            maxLines = 2,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 }
 
