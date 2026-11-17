@@ -284,3 +284,18 @@ Build A: built, merged on a passing build at the owner's request, waiting for th
 Open:
 - Not run on a phone. The generated sounds have never been listened to; they may need tuning by ear.
 
+Owner confirmed build A (build 21): works; the generated sounds are "okay, work for now".
+
+Build B (Home, tabs, article page): built, merged on a passing build at the owner's request, waiting for the owner to test.
+- Navigation: Nav keeps a stack whose first item is the tab (home, search, library); other screens open on top and Back returns through them. Tabs along the bottom (NavigationBar) with the mini player above them whenever an article is open.
+- Home (HomeFeed.kt), owner's sketch: "Article of the Day" as a large centred square card; a divider; a band with "Continue listening" (one square for the open article, or the latest unfinished one; tap continues playing; hidden when there is none) and, beside it behind a vertical divider, "Suggested topics" as square tiles in a row the user swipes; a divider; "Popular reads" (today's most read) as square cards in a row the user swipes. No automatic scrolling. Feed from en.wikipedia.org/api/rest_v1/feed/featured/YYYY/MM/DD, falling back to api.wikimedia.org's feed address and to yesterday; pictures and descriptions are then asked for separately with pilicense=free because the feed's own pictures can be non-free. Fetched once a day and saved for offline use (files/home.json). Main Page and special pages are left out of Popular reads.
+- Topic tiles: a placeholder list in HomeFeed.TOPICS (name and search words), coloured squares; tapping opens a topic page with full-text search results. Replace with the owner's list later.
+- Article page (Reader.Preview): opened from Home, topics and search. Picture, title, description, listening time at the current speed, section count, word count, progress and download status if in the library, Play (or Continue), Download, Open on Wikipedia, the opening paragraph and attribution. The text is fetched to show this but the article joins the library only on Play or Download.
+- Library tab: filters All, In progress, Finished, Downloaded. A "finished" flag is now saved when an article is heard to the end.
+- Player: a Sound button (background sound and volume, the same setting as in Settings) joins Speed, Sleep and Sections; Restart moved to the ⋮ menu.
+- Sharing a link or pasting one still opens the player directly.
+- Unit tests: FeedTitlesTest (2).
+Open:
+- Not run on a phone; the daily feed has never been fetched from here (no access to Wikipedia from the build machine).
+- Library vs saved: the owner may change this later.
+

@@ -71,6 +71,7 @@ object Library {
             hasAudio = audioFile(title).exists(),
             imageCredit = old?.imageCredit ?: "",
             imageChecked = !resetPosition && old?.imageChecked == true,
+            finished = !resetPosition && old?.finished == true,
         )
         write(entry)
         reload()
@@ -81,6 +82,13 @@ object Library {
     fun savePosition(id: String, position: Int, sentences: Int, audioPositionMs: Int) {
         val old = read(id) ?: return
         write(old.copy(position = position, sentences = sentences, audioPositionMs = audioPositionMs))
+        reload()
+    }
+
+    @Synchronized
+    fun markFinished(id: String) {
+        val old = read(id) ?: return
+        write(old.copy(finished = true))
         reload()
     }
 
