@@ -153,6 +153,9 @@ object Reader : Speaker.Listener {
         fetchTitle((parsed as WikiLink.Result.Article).title, resetPosition = false)
     }
 
+    /** Fetches an article picked from search. */
+    fun fetchByTitle(title: String) = fetchTitle(title, resetPosition = false)
+
     /** Fetches the open article again from Wikipedia and starts it from the beginning. */
     fun refresh() {
         val e = entry ?: return
@@ -171,6 +174,7 @@ object Reader : Speaker.Listener {
                 val fetched = WikipediaClient.fetchPlainText(requested)
                 val built = ArticleText.build(fetched.title, fetched.text, maxChars)
                 val saved = Library.save(fetched.title, fetched.text, built.sentences.size, resetPosition)
+                if (!saved.imageChecked) thread(name = "picture") { fetchPicture(saved) }
                 val ms = System.currentTimeMillis() - started
                 main.post {
                     display(built, saved)
@@ -203,6 +207,7 @@ object Reader : Speaker.Listener {
             try {
                 val saved = Library.find(id) ?: throw IllegalStateException("It is no longer in the library")
                 val built = ArticleText.build(saved.title, Library.text(id), maxChars)
+                if (!saved.imageChecked) thread(name = "picture") { fetchPicture(saved) }
                 main.post {
                     display(built, saved)
                     DebugLog.i("Opened \"${saved.title}\" from the library at sentence ${index + 1} of ${built.sentences.size}")
@@ -214,6 +219,20 @@ object Reader : Speaker.Listener {
                     show("Could not open the article: ${t.message ?: t.javaClass.simpleName}", error = true)
                 }
             }
+        }
+    }
+
+    /** Looks for a free-licensed picture for the article. Runs on a background thread; never fails loudly. */
+    private fun fetchPicture(entry: LibraryEntry) {
+        try {
+            val picture = WikipediaClient.fetchPicture(entry.title)
+            Library.savePicture(entry.id, picture?.bytes, picture?.credit.orEmpty())
+            DebugLog.i(
+                if (picture != null) "Picture for \"${entry.title}\": ${picture.bytes.size / 1024} KB. ${picture.credit}"
+                else "No free-licensed picture for \"${entry.title}\""
+            )
+        } catch (t: Throwable) {
+            DebugLog.e("Could not get a picture for \"${entry.title}\" (will try again next time)", t)
         }
     }
 

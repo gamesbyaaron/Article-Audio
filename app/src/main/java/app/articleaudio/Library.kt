@@ -32,6 +32,18 @@ object Library {
 
     fun find(id: String): LibraryEntry? = read(id)
 
+    /** The article's picture, whether or not it exists. */
+    fun imageFile(id: String): File = File(File(root, id), "image.jpg")
+
+    /** Stores the article's picture and its credit, or records that it has none. */
+    @Synchronized
+    fun savePicture(id: String, bytes: ByteArray?, credit: String) {
+        val old = read(id) ?: return
+        if (bytes != null) imageFile(id).writeBytes(bytes)
+        write(old.copy(imageCredit = if (bytes != null) credit else "", imageChecked = true))
+        reload()
+    }
+
     fun text(id: String): String = File(File(root, id), "text.txt").readText()
 
     /** Saves a fetched article. Keeps the reading position unless [resetPosition]. */
@@ -54,6 +66,8 @@ object Library {
             sentences = sentences,
             audioPositionMs = if (resetPosition) 0 else old?.audioPositionMs ?: 0,
             hasAudio = audioFile(title).exists(),
+            imageCredit = old?.imageCredit ?: "",
+            imageChecked = !resetPosition && old?.imageChecked == true,
         )
         write(entry)
         reload()
