@@ -20,6 +20,9 @@ object Reader : Speaker.Listener {
     private const val HEADING_PAUSE_MS = 700L
     private const val QUEUE_AHEAD = 3
 
+    /** Built-in voices speak roughly this many characters a second at normal speed. */
+    const val CHARS_PER_SECOND = 15
+
     var linkInput by mutableStateOf("")
     var loading by mutableStateOf(false)
         private set
@@ -218,6 +221,22 @@ object Reader : Speaker.Listener {
     }
 
     fun skip(by: Int) = jumpTo(index + by)
+
+    /** Jumps roughly [seconds] of listening forwards or backwards, to the start of a sentence. */
+    fun skipSeconds(seconds: Int) {
+        val a = article ?: return
+        val target = a.startChars[index] + (seconds * CHARS_PER_SECOND * speed).toInt()
+        var sentence = a.sentenceAtChar(target.coerceIn(0, maxOf(0, a.totalChars - 1)))
+        if (seconds < 0 && sentence >= index) sentence = index - 1
+        if (seconds > 0 && sentence <= index) sentence = index + 1
+        jumpTo(sentence)
+    }
+
+    /** Jumps to a point in the article, where 0 is the start and 1 is the end. */
+    fun seekTo(fraction: Float) {
+        val a = article ?: return
+        jumpTo(a.sentenceAtChar((fraction * a.totalChars).toInt()))
+    }
 
     fun jumpTo(sentence: Int) {
         val a = article ?: return

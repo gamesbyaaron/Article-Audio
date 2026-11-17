@@ -195,33 +195,50 @@ private fun HomeScreen(onOpen: (String) -> Unit, onPlay: () -> Unit) {
 private fun ArticlePlayer(article: Article, onOpen: (String) -> Unit, onPlay: () -> Unit) {
     val index = Reader.index.coerceIn(0, article.sentences.size - 1)
     val current = article.sentences[index]
-    // Built-in voices speak roughly 900 characters a minute at normal speed.
     val speed = Reader.speed
-    val minutesLeft = remember(article, index, speed) {
-        maxOf(1, (article.sentences.drop(index).sumOf { it.text.length } / (900 * speed)).toInt())
-    }
+    // There is no audio file behind live reading, so times are worked out from the text length.
+    val charsPerSecond = Reader.CHARS_PER_SECOND * speed
+    val total = maxOf(1, article.totalChars)
+    val elapsedSeconds = (article.startChars[index] / charsPerSecond).toInt()
+    val totalSeconds = (total / charsPerSecond).toInt()
+    var dragging by remember { mutableStateOf<Float?>(null) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(article.title, style = MaterialTheme.typography.titleLarge)
-            Text(
-                "Sentence ${index + 1} of ${article.sentences.size} · about $minutesLeft min left",
-                style = MaterialTheme.typography.bodySmall,
-            )
             Text(
                 current.text,
                 style = if (current.isHeading) MaterialTheme.typography.titleMedium
                 else MaterialTheme.typography.bodyLarge,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { Reader.skip(-1) }) { Text("Back") }
+            Slider(
+                value = dragging ?: (article.startChars[index].toFloat() / total),
+                onValueChange = { dragging = it },
+                onValueChangeFinished = {
+                    dragging?.let { Reader.seekTo(it) }
+                    dragging = null
+                },
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    clock(dragging?.let { (it * totalSeconds).toInt() } ?: elapsedSeconds),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text("about ${clock(totalSeconds)}", style = MaterialTheme.typography.bodySmall)
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(onClick = { Reader.skipSeconds(-15) }) { Text("−15s") }
                 Button(onClick = { if (Reader.playing) Reader.pause() else onPlay() }) {
                     Text(if (Reader.playing) "Pause" else "Play")
                 }
-                OutlinedButton(onClick = { Reader.skip(1) }) { Text("Next") }
+                OutlinedButton(onClick = { Reader.skipSeconds(15) }) { Text("+15s") }
+                TextButton(onClick = { Reader.changeSpeed(nextSpeed(speed)) }) { Text("${trimSpeed(speed)}×") }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { onOpen("text") }) { Text("Full text") }
@@ -231,6 +248,21 @@ private fun ArticlePlayer(article: Article, onOpen: (String) -> Unit, onPlay: ()
         }
     }
 }
+
+/** 75 -> "1:15", 3700 -> "1:01:40". */
+private fun clock(seconds: Int): String {
+    val h = seconds / 3600
+    val m = seconds % 3600 / 60
+    val s = seconds % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
+
+private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f)
+
+/** The next faster speed, wrapping round to the slowest. */
+private fun nextSpeed(current: Float): Float = SPEEDS.firstOrNull { it > current + 0.01f } ?: SPEEDS.first()
+
+private fun trimSpeed(speed: Float): String = "%.2f".format(speed).trimEnd('0').trimEnd('.')
 
 /** The whole cleaned article. The sentence being read is highlighted; tap any sentence to jump to it. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -390,8 +422,8 @@ private fun SettingsScreen(onBack: () -> Unit) {
                     modifier = Modifier.padding(top = 16.dp),
                 )
                 Text(
-                    "Voices installed on this phone that work without internet. " +
-                        "More can be added in the phone's text-to-speech settings.",
+                    "Voices installed on this phone that work without internet. Tap one to hear it. " +
+                        "Male and female labels are a best guess and missing for voices the app does not recognise.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )

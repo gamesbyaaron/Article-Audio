@@ -47,6 +47,18 @@ class ArticleTextTest {
     }
 
     @Test
+    fun positionInTheWholeArticle() {
+        val article = ArticleText.build("T", "One. Two.\nThree.")
+        // Sentences: "T." "One." "Two." "Three."
+        assertEquals(listOf(0, 2, 6, 10), article.startChars.toList())
+        assertEquals(16, article.totalChars)
+        assertEquals(0, article.sentenceAtChar(0))
+        assertEquals(1, article.sentenceAtChar(5))
+        assertEquals(2, article.sentenceAtChar(6))
+        assertEquals(3, article.sentenceAtChar(999))
+    }
+
+    @Test
     fun longParagraphsAreSplitBetweenSentences() {
         val article = ArticleText.build("T", "Aaaa bbbb. Cccc dddd. Eeee ffff.", maxChars = 22)
         assertEquals(listOf("T.", "Aaaa bbbb. Cccc dddd.", "Eeee ffff."), article.chunks.map { it.text })

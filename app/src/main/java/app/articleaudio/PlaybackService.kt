@@ -50,8 +50,8 @@ class PlaybackService : Service() {
         session.setCallback(object : MediaSession.Callback() {
             override fun onPlay() = Reader.play()
             override fun onPause() = Reader.pause()
-            override fun onSkipToNext() = Reader.skip(1)
-            override fun onSkipToPrevious() = Reader.skip(-1)
+            override fun onSkipToNext() = Reader.skipSeconds(15)
+            override fun onSkipToPrevious() = Reader.skipSeconds(-15)
             override fun onStop() = Reader.stop()
         })
         session.isActive = true
@@ -80,8 +80,8 @@ class PlaybackService : Service() {
         }
         when (intent?.action) {
             ACTION_TOGGLE -> if (Reader.playing) Reader.pause() else Reader.play()
-            ACTION_NEXT -> Reader.skip(1)
-            ACTION_PREVIOUS -> Reader.skip(-1)
+            ACTION_NEXT -> Reader.skipSeconds(15)
+            ACTION_PREVIOUS -> Reader.skipSeconds(-15)
             ACTION_STOP -> Reader.stop()
         }
         refresh()
@@ -146,12 +146,12 @@ class PlaybackService : Service() {
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOngoing(playing)
             .setOnlyAlertOnce(true)
-            .addAction(action(android.R.drawable.ic_media_previous, "Back", ACTION_PREVIOUS, 1))
+            .addAction(action(android.R.drawable.ic_media_previous, "Back 15 seconds", ACTION_PREVIOUS, 1))
             .addAction(
                 if (playing) action(android.R.drawable.ic_media_pause, "Pause", ACTION_TOGGLE, 2)
                 else action(android.R.drawable.ic_media_play, "Play", ACTION_TOGGLE, 2)
             )
-            .addAction(action(android.R.drawable.ic_media_next, "Next", ACTION_NEXT, 3))
+            .addAction(action(android.R.drawable.ic_media_next, "Forward 15 seconds", ACTION_NEXT, 3))
             .addAction(action(android.R.drawable.ic_menu_close_clear_cancel, "Stop", ACTION_STOP, 4))
             .setStyle(
                 Notification.MediaStyle()
