@@ -1,7 +1,9 @@
 package app.articleaudio
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -29,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -245,7 +248,56 @@ private fun ArticlePlayer(article: Article, onOpen: (String) -> Unit, onPlay: ()
                 OutlinedButton(onClick = { onOpen("changes") }) { Text("Changes (${article.changes.size})") }
             }
             TextButton(onClick = { Reader.stop() }) { Text("Stop and go to start") }
+            DownloadSection(article)
         }
+    }
+}
+
+/** Makes an audio file of the article, with progress, and offers to share or open the result. */
+@Composable
+private fun DownloadSection(article: Article) {
+    val context = LocalContext.current
+    val mine = Exporter.title == article.title
+    when {
+        Exporter.running -> {
+            Text(
+                "Making audio of \"${Exporter.title}\": ${(Exporter.progress * 100).toInt()}%",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            LinearProgressIndicator(progress = { Exporter.progress }, modifier = Modifier.fillMaxWidth())
+            TextButton(onClick = { Exporter.cancel() }) { Text("Cancel download") }
+        }
+        else -> {
+            OutlinedButton(onClick = { Exporter.start(article) }) { Text("Download audio") }
+            if (mine && Exporter.error.isNotEmpty()) {
+                Text(Exporter.error, color = MaterialTheme.colorScheme.error)
+            }
+            if (mine && Exporter.savedAs.isNotEmpty()) {
+                Text("Saved to ${Exporter.savedAs}", style = MaterialTheme.typography.bodySmall)
+                val uri = Exporter.savedUri
+                if (uri != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { sendAudio(context, uri, Intent.ACTION_SEND) }) { Text("Share") }
+                        OutlinedButton(onClick = { sendAudio(context, uri, Intent.ACTION_VIEW) }) { Text("Open") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Hands the finished audio file to another app, to share it or to play it. */
+private fun sendAudio(context: Context, uri: Uri, action: String) {
+    val intent = Intent(action).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    if (action == Intent.ACTION_SEND) {
+        intent.setType("audio/mp4").putExtra(Intent.EXTRA_STREAM, uri)
+    } else {
+        intent.setDataAndType(uri, "audio/mp4")
+    }
+    try {
+        context.startActivity(Intent.createChooser(intent, null).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    } catch (t: Throwable) {
+        DebugLog.e("Could not hand the audio file to another app", t)
     }
 }
 
