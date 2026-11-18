@@ -21,6 +21,7 @@ class ArticleAudioApp : Application() {
         HomeFeed.init(this)
         Queue.init(this)
         Collections.init(this)
+        Library.migrateSaved(Collections.all.flatMap { it.items }.toSet())
         Reader.init(this)
         Exporter.init(this)
 

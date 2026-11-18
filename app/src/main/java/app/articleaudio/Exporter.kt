@@ -64,6 +64,8 @@ object Exporter {
 
     fun start(article: Article) {
         if (running) return
+        // Downloading something means keeping it.
+        Library.setSaved(Wav.fileName(article.title), true)
         running = true
         cancelled = false
         progress = 0f

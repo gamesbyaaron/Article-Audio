@@ -73,6 +73,8 @@ object Library {
             imageChecked = !resetPosition && old?.imageChecked == true,
             finished = !resetPosition && old?.finished == true,
             description = description.ifEmpty { old?.description.orEmpty() },
+            saved = old?.saved ?: false,
+            inHistory = old?.inHistory ?: false,
         )
         write(entry)
         reload()
@@ -83,6 +85,73 @@ object Library {
     fun savePosition(id: String, position: Int, sentences: Int, audioPositionMs: Int) {
         val old = read(id) ?: return
         write(old.copy(position = position, sentences = sentences, audioPositionMs = audioPositionMs))
+        reload()
+    }
+
+    @Synchronized
+    fun setSaved(id: String, saved: Boolean) {
+        val old = read(id) ?: return
+        if (old.saved == saved) return
+        write(old.copy(saved = saved))
+        DebugLog.i(if (saved) "Saved \"${old.title}\"" else "Unsaved \"${old.title}\"")
+        reload()
+    }
+
+    /** Puts the article in History (it was listened to). */
+    @Synchronized
+    fun markPlayed(id: String) {
+        val old = read(id) ?: return
+        if (old.inHistory) return
+        write(old.copy(inHistory = true))
+        reload()
+    }
+
+    @Synchronized
+    fun removeFromHistory(id: String) {
+        val old = read(id) ?: return
+        write(old.copy(inHistory = false))
+        reload()
+    }
+
+    /**
+     * Empties History. Articles that are saved, in a collection, queued or open stay on the
+     * phone; the rest are deleted to free space. Returns how many were deleted.
+     */
+    @Synchronized
+    fun clearHistory(keep: Set<String>): Int {
+        var deleted = 0
+        for (e in readAll().filter { it.inHistory }) {
+            if (e.saved || e.id in keep) {
+                write(e.copy(inHistory = false))
+            } else {
+                delete(e.id)
+                deleted++
+            }
+        }
+        DebugLog.i("History cleared; $deleted articles removed from the phone")
+        reload()
+        return deleted
+    }
+
+    /**
+     * One-off for articles from before Saved existed: ones in a collection count as saved too.
+     * Only touches articles whose details do not say yet whether they are saved.
+     */
+    @Synchronized
+    fun migrateSaved(inCollections: Set<String>) {
+        for (dir in root.listFiles() ?: emptyArray()) {
+            try {
+                val file = File(dir, "details.properties")
+                if (!file.exists()) continue
+                val p = Properties()
+                file.inputStream().use { p.load(it) }
+                if (p.getProperty("saved") != null) continue
+                val e = read(dir.name) ?: continue
+                write(e.copy(saved = e.saved || e.id in inCollections))
+            } catch (t: Throwable) {
+                DebugLog.e("Could not update ${dir.name} for Saved and History", t)
+            }
+        }
         reload()
     }
 

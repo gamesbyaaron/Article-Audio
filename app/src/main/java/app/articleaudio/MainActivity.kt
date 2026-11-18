@@ -112,6 +112,8 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import java.text.DateFormat
 import java.util.Date
 
@@ -497,13 +499,37 @@ private fun TopicTile(i: Int) {
 @Composable
 private fun LibraryScreen() {
     var filter by rememberSaveable { mutableStateOf("all") }
-    val entries = Library.entries.filter {
+    var tab by rememberSaveable { mutableStateOf("saved") }
+    var clearing by remember { mutableStateOf(false) }
+    val inTab = Library.entries.filter { if (tab == "saved") it.saved else it.inHistory }
+    val entries = inTab.filter {
         when (filter) {
             "progress" -> it.position > 0
             "finished" -> it.finished
             "downloaded" -> it.hasAudio
             else -> true
         }
+    }
+
+    if (clearing) {
+        AlertDialog(
+            onDismissRequest = { clearing = false },
+            title = { Text("Clear history?") },
+            text = {
+                Text(
+                    "Articles leave History. Ones you saved, put in a collection or queued stay on your phone; " +
+                        "the rest are removed from the phone, along with your place in them."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    clearing = false
+                    val keep = Collections.all.flatMap { it.items }.toSet() + Queue.upNext + listOfNotNull(Reader.entry?.id)
+                    Library.clearHistory(keep)
+                }) { Text("Clear") }
+            },
+            dismissButton = { TextButton(onClick = { clearing = false }) { Text("Cancel") } },
+        )
     }
 
     Scaffold(
@@ -535,11 +561,11 @@ private fun LibraryScreen() {
                 }
             }
             item {
-                Text(
-                    "Articles",
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-                )
+                TabRow(selectedTabIndex = if (tab == "saved") 0 else 1, modifier = Modifier.padding(top = 8.dp)) {
+                    Tab(selected = tab == "saved", onClick = { tab = "saved" }, text = { Text("Saved") })
+                    Tab(selected = tab == "history", onClick = { tab = "history" }, text = { Text("History") })
+                }
+                Spacer(Modifier.height(8.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val filters = listOf("all" to "All", "progress" to "In progress", "finished" to "Finished", "downloaded" to "Downloaded")
                     items(filters.size) { i ->
@@ -548,8 +574,18 @@ private fun LibraryScreen() {
                     }
                 }
             }
-            if (Library.entries.isEmpty()) {
-                item { EmptyLibrary() }
+            if (tab == "history" && inTab.isNotEmpty()) {
+                item { TextButton(onClick = { clearing = true }) { Text("Clear history") } }
+            }
+            if (inTab.isEmpty()) {
+                item {
+                    Text(
+                        if (tab == "saved") "Nothing saved yet. Tap the bookmark on an article's page or in the player to keep it here."
+                        else "Articles you listen to appear here.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
             } else if (entries.isEmpty()) {
                 item {
                     Text(
@@ -562,7 +598,7 @@ private fun LibraryScreen() {
                 items(entries.size, key = { entries[it].id }) { i -> LibraryCard(entries[i]) }
                 item {
                     Text(
-                        "Press and hold an article for more: play next, add to a collection, rename, delete.",
+                        "Press and hold an article for more: save, play next, add to a collection, rename, delete.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -658,6 +694,10 @@ private fun EntryMenu(entry: LibraryEntry, expanded: Boolean, onDismiss: () -> U
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = { Text(if (entry.saved) "Unsave" else "Save") },
+            onClick = { onDismiss(); Library.setSaved(entry.id, !entry.saved) },
+        )
         DropdownMenuItem(text = { Text("Play next") }, onClick = { onDismiss(); Queue.playNext(entry.id) })
         DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onDismiss(); Queue.add(entry.id) })
         DropdownMenuItem(text = { Text("Add to collection…") }, onClick = { onDismiss(); collecting = true })
@@ -666,6 +706,9 @@ private fun EntryMenu(entry: LibraryEntry, expanded: Boolean, onDismiss: () -> U
             text = { Text(if (entry.finished) "Mark as not finished" else "Mark as finished") },
             onClick = { onDismiss(); Library.setFinished(entry.id, !entry.finished) },
         )
+        if (entry.inHistory) {
+            DropdownMenuItem(text = { Text("Remove from history") }, onClick = { onDismiss(); Library.removeFromHistory(entry.id) })
+        }
         DropdownMenuItem(text = { Text("Delete") }, onClick = { onDismiss(); deleting = true })
     }
     if (collecting) AddToCollectionDialog(entry.id, onDone = { collecting = false })
@@ -1051,6 +1094,15 @@ private fun ArticleScreen(onBack: () -> Unit) {
                         }
                     }
                     var collecting by remember { mutableStateOf<String?>(null) }
+                    val isSaved = saved?.saved == true
+                    TextButton(onClick = {
+                        if (saved != null) Library.setSaved(saved.id, !isSaved)
+                        else Reader.savePreview { Library.setSaved(it.id, true) }
+                    }) {
+                        AppIcon(if (isSaved) R.drawable.ic_bookmark else R.drawable.ic_bookmark_border, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (isSaved) "Saved" else "Save")
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = { Reader.savePreview { Queue.playNext(it.id) } }) { Text("Play next") }
                         TextButton(onClick = { Reader.savePreview { Queue.add(it.id) } }) { Text("Add to queue") }
@@ -1291,6 +1343,12 @@ private fun PlayerScreen(onBack: () -> Unit, onPlay: () -> Unit) {
                 navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
                 actions = {
                     if (article != null && saved != null) {
+                        IconButton(onClick = { Library.setSaved(saved.id, !saved.saved) }) {
+                            AppIcon(
+                                if (saved.saved) R.drawable.ic_bookmark else R.drawable.ic_bookmark_border,
+                                if (saved.saved) "Unsave" else "Save",
+                            )
+                        }
                         IconButton(onClick = { Nav.screen = "queue" }) { AppIcon(R.drawable.ic_queue, "Queue") }
                         IconButton(onClick = { Nav.screen = "text" }) { AppIcon(R.drawable.ic_text, "Full text") }
                         Box {

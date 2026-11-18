@@ -26,6 +26,10 @@ data class LibraryEntry(
     val finished: Boolean = false,
     /** Wikipedia's short description, such as "2024 video game". */
     val description: String = "",
+    /** Kept on purpose with the Save button (or by downloading it). */
+    val saved: Boolean = false,
+    /** Listened to, so shown under History until history is cleared. */
+    val inHistory: Boolean = false,
 ) {
     /** Which generic icon to show when there is no free picture. */
     val category: String get() = Category.of(description, title)
@@ -45,6 +49,8 @@ data class LibraryEntry(
         setProperty("imageChecked", imageChecked.toString())
         setProperty("finished", finished.toString())
         setProperty("description", description)
+        setProperty("saved", saved.toString())
+        setProperty("inHistory", inHistory.toString())
     }
 
     companion object {
@@ -67,6 +73,10 @@ data class LibraryEntry(
                 imageChecked = p.getProperty("imageChecked") == "true",
                 finished = p.getProperty("finished") == "true",
                 description = p.getProperty("description") ?: "",
+                // Articles from before Saved and History existed: all were listened to, and
+                // downloaded ones count as saved.
+                saved = p.getProperty("saved")?.toBoolean() ?: hasAudio,
+                inHistory = p.getProperty("inHistory")?.toBoolean() ?: true,
             )
         }
     }
