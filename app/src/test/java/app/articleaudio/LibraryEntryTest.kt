@@ -32,5 +32,20 @@ class LibraryEntryTest {
     }
 
     @Test
+    fun articlesFromBeforeSavedAndHistoryGoToHistoryAndDownloadsCountAsSaved() {
+        val p = Properties().apply { setProperty("title", "Mount Everest") }
+        val plain = LibraryEntry.fromProperties("Mount Everest", p, hasAudio = false)!!
+        assertEquals(true, plain.inHistory)
+        assertEquals(false, plain.saved)
+        assertEquals(true, LibraryEntry.fromProperties("Mount Everest", p, hasAudio = true)!!.saved)
+    }
+
+    @Test
+    fun savedAndHistorySurviveSaving() {
+        val e = entry.copy(saved = true, inHistory = false)
+        assertEquals(e, LibraryEntry.fromProperties(e.id, e.toProperties(), hasAudio = true))
+    }
+
+    @Test
     fun unusableDetailsAreIgnored() = assertNull(LibraryEntry.fromProperties("x", Properties(), hasAudio = false))
 }

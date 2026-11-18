@@ -322,3 +322,13 @@ Queue and collections (builds C and D together, owner, 18 November 2026): built,
 - Not done (owner undecided): a Save/bookmark button separate from playing, sorting, search within the library.
 - Unit tests: QueueStateTest (6), CollectionFormatTest (3).
 
+Owner confirmed build 27 (queue and collections) works well, but wanted the Library split into Saved and History.
+
+Saved and History (owner, 18 November 2026): built, merged on a passing build at the owner's request, waiting for the owner to test.
+- Library tab: Collections row at the top, then Saved and History tabs, each with the All / In progress / Finished / Downloaded filters.
+- Saved: articles kept on purpose with the bookmark (article page, player top bar, press-and-hold Save/Unsave). Downloading an article saves it. Playing does not.
+- History: articles listened to (and ones opened from a shared or pasted link), most recently opened first. "Remove from history" in the press-and-hold menu; "Clear history" empties it and deletes from the phone any article that is not saved, in a collection, queued or open.
+- Existing articles (no saved/inHistory in their details) are put in History; downloaded ones and ones in collections are also marked Saved (Library.migrateSaved at start-up).
+- Not done: saving from Home or search cards by press and hold.
+- Unit tests: LibraryEntryTest gains 2.
+

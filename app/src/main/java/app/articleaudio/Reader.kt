@@ -299,6 +299,8 @@ object Reader : Speaker.Listener {
                 val fetched = WikipediaClient.fetchPlainText(requested)
                 val built = ArticleText.build(fetched.title, fetched.text, maxChars)
                 val saved = Library.save(fetched.title, fetched.text, built.sentences.size, resetPosition, fetched.description)
+                // Opened from a shared or pasted link: it belongs in History straight away.
+                Library.markPlayed(saved.id)
                 if (!saved.imageChecked) thread(name = "picture") { fetchPicture(saved) }
                 val ms = System.currentTimeMillis() - started
                 main.post {
@@ -596,6 +598,7 @@ object Reader : Speaker.Listener {
 
     fun play() {
         val a = article ?: return
+        entry?.let { Library.markPlayed(it.id) }
         val player = media
         if (audioMode && player == null) return
         if (!audioMode && !speaker.ready) {
