@@ -102,6 +102,41 @@ object WikipediaClient {
         }.toMap()
     }
 
+    /** The visible Wikipedia categories of several articles at once, by title. */
+    fun categoriesFor(titles: List<String>): Map<String, List<String>> {
+        if (titles.isEmpty()) return emptyMap()
+        val json = getJson(
+            "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1" +
+                "&prop=categories&clshow=!hidden&cllimit=max" +
+                "&titles=" + URLEncoder.encode(titles.take(50).joinToString("|"), "UTF-8")
+        )
+        val pages = json.optJSONObject("query")?.optJSONArray("pages") ?: return emptyMap()
+        return (0 until pages.length()).associate { i ->
+            val page = pages.getJSONObject(i)
+            val list = page.optJSONArray("categories")
+            page.optString("title") to (0 until (list?.length() ?: 0)).map { list!!.getJSONObject(it).optString("title") }
+        }
+    }
+
+    /** Articles in a Wikipedia category ("Category:Cold War conflicts"), with descriptions and free pictures. */
+    fun categoryMembers(category: String): List<SearchResult> {
+        val json = getJson(
+            "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2" +
+                "&generator=categorymembers&gcmtype=page&gcmnamespace=0&gcmlimit=40" +
+                "&prop=pageimages|description&piprop=thumbnail&pithumbsize=120&pilicense=free" +
+                "&gcmtitle=" + URLEncoder.encode(category, "UTF-8")
+        )
+        val pages = json.optJSONObject("query")?.optJSONArray("pages") ?: return emptyList()
+        return (0 until pages.length()).map { i ->
+            val page = pages.getJSONObject(i)
+            SearchResult(
+                title = page.optString("title"),
+                description = page.optString("description"),
+                thumbnail = page.optJSONObject("thumbnail")?.optString("source")?.ifEmpty { null },
+            )
+        }
+    }
+
     /** Articles about a topic, most relevant first, from Wikipedia's full-text search. */
     fun searchTopic(query: String): List<SearchResult> {
         val json = getJson(

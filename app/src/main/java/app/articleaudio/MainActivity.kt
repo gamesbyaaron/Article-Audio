@@ -179,7 +179,7 @@ object Nav {
     private val stack = mutableStateListOf("home")
 
     /** The topic shown on the topic screen. */
-    var topic by mutableStateOf("" to "")
+    var topic by mutableStateOf(HomeFeed.TOPICS.first())
 
     /** The collection shown on the collection screen. */
     var collection by mutableStateOf("")
@@ -274,6 +274,8 @@ private fun AppIcon(id: Int, description: String?, modifier: Modifier = Modifier
 @Composable
 private fun HomeScreen(onPlay: () -> Unit) {
     LaunchedEffect(Unit) { HomeFeed.refresh() }
+    val historyKey = Library.entries.filter { it.inHistory }.sortedByDescending { it.openedAt }.take(10).joinToString("|") { it.id }
+    LaunchedEffect(historyKey) { HomeFeed.refreshSuggestions() }
     val featured = HomeFeed.featured
     // The article to continue: the open one, or else the most recently opened unfinished one.
     val open = Reader.entry?.let { e -> Library.entries.firstOrNull { it.id == e.id } }
@@ -340,7 +342,8 @@ private fun HomeScreen(onPlay: () -> Unit) {
                             contentPadding = PaddingValues(horizontal = if (resume != null) 12.dp else 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            items(HomeFeed.TOPICS.size) { i -> TopicTile(i) }
+                            val topics = HomeFeed.suggested
+                            items(topics.size, key = { topics[it].label }) { i -> TopicTile(topics[i]) }
                         }
                     }
                 }
@@ -464,15 +467,14 @@ private fun ContinueTile(entry: LibraryEntry, onPlay: () -> Unit) {
 
 /** A square topic tile: a picture from one of its articles (or the topic's icon) with its name. */
 @Composable
-private fun TopicTile(i: Int) {
-    val topic = HomeFeed.TOPICS[i]
+private fun TopicTile(topic: HomeFeed.Topic) {
     val url = HomeFeed.topicPictures[topic.label]
     Box(
         modifier = Modifier
             .size(110.dp)
             .clip(MaterialTheme.shapes.medium)
             .clickable {
-                Nav.topic = topic.label to topic.query
+                Nav.topic = topic
                 Nav.screen = "topic"
             },
         contentAlignment = Alignment.BottomStart,
@@ -979,13 +981,24 @@ private fun ResultRow(result: WikipediaClient.SearchResult) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TopicScreen(onBack: () -> Unit) {
-    val (label, query) = Nav.topic
+    val topic = Nav.topic
+    val label = topic.label
+    val query = topic.wikiCategory ?: topic.query
     var results by remember(query) { mutableStateOf<List<WikipediaClient.SearchResult>>(emptyList()) }
     var loading by remember(query) { mutableStateOf(true) }
     var problem by remember(query) { mutableStateOf("") }
     LaunchedEffect(query) {
         try {
-            results = withContext(Dispatchers.IO) { WikipediaClient.searchTopic(query) }
+            val category = topic.wikiCategory
+            results = withContext(Dispatchers.IO) {
+                if (category != null) {
+                    // A topic suggested from History: its articles, leaving out ones already in the library.
+                    val have = Library.entries.map { it.title }.toSet()
+                    WikipediaClient.categoryMembers(category).filter { it.title !in have }
+                } else {
+                    WikipediaClient.searchTopic(topic.query)
+                }
+            }
             if (results.isEmpty()) problem = "No articles found."
         } catch (t: Throwable) {
             DebugLog.e("Topic \"$label\" failed to load", t)
