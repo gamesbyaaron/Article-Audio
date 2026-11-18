@@ -308,3 +308,17 @@ Icons, topic pictures, Popular reads fix (owner, 17 November 2026): built, merge
 - Popular reads was empty because, early in the UTC day, today's feed has the featured article but no most-read list yet, and that half-filled day was saved as done. Now the most-read list falls back to yesterday's feed, a day is only marked done when both parts are present, and Home can be pulled down to refresh.
 - Unit tests: CategoryTest (20).
 
+Owner confirmed build 25: Popular reads filled in, topic pictures show, the Article of the Day icon is right.
+
+Queue and collections (builds C and D together, owner, 18 November 2026): built, merged on a passing build at the owner's request, waiting for the owner to test.
+- Queue (Queue.kt, pure part QueueState.kt): "up next" and a short history of library article ids, saved in files/queue.txt. Play next (goes first), Add to queue (goes last), reorder, remove, clear. When an article ends the next one opens and plays where it was left, unless a sleep timer was set for the end of the article. Previous goes back through the history, or to the start of the article if there is none. Deleting an article removes it from the queue.
+- Collections (Collections.kt, pure part CollectionFormat.kt, files/collections.txt): named, ordered lists of library articles, like playlists; an article can be in any number. Play resumes each article where it was left and skips finished ones (owner's choice); "Play from the start" in the ⋮ menu resets them first. Playing a collection loads it into the queue, so the queue can then be changed without changing the collection. A collection's picture is its first article's.
+- Library tab: a Collections row at the top (square tiles, plus a New collection tile), then the articles with their filters. Press and hold an article for: Play next, Add to queue, Add to collection, Rename, Mark as finished / not finished, Delete.
+- Collection screen: picture, name, article count and total time, Play, and each article with up, down and remove buttons; tap an article to play the collection from there.
+- Queue screen (queue icon on the player): Now playing and Up next, with up, down, remove and Clear; tap an article to jump to it.
+- Article page: Play next, Add to queue and Collection… buttons (the article is saved to the library first).
+- Player: previous and next article buttons either side of the 15-second skips.
+- Lock screen and notification: previous article, back 15 s, play/pause, forward 15 s, next article. The media session's skip buttons and headphone next/previous move between articles; back/forward 15 s are custom actions, which newer Android shows beside them. The Stop button is gone; swiping the notification away while paused stops playback.
+- Not done (owner undecided): a Save/bookmark button separate from playing, sorting, search within the library.
+- Unit tests: QueueStateTest (6), CollectionFormatTest (3).
+

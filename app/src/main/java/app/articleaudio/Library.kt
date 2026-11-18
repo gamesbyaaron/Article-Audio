@@ -87,9 +87,12 @@ object Library {
     }
 
     @Synchronized
-    fun markFinished(id: String) {
+    fun markFinished(id: String) = setFinished(id, true)
+
+    @Synchronized
+    fun setFinished(id: String, finished: Boolean) {
         val old = read(id) ?: return
-        write(old.copy(finished = true))
+        write(old.copy(finished = finished))
         reload()
     }
 
@@ -116,6 +119,8 @@ object Library {
             audioFile(old.title).delete()
             sectionsFile(old.title).delete()
         }
+        Queue.forget(id)
+        Collections.forget(id)
         DebugLog.i("Deleted \"${old?.title ?: id}\" from the library")
         reload()
     }
