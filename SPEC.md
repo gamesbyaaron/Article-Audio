@@ -332,3 +332,12 @@ Saved and History (owner, 18 November 2026): built, merged on a passing build at
 - Not done: saving from Home or search cards by press and hold.
 - Unit tests: LibraryEntryTest gains 2.
 
+Owner confirmed build 29 (Saved and History) looks good.
+
+Suggested topics from History (owner, 18 November 2026; option 2 of two offered): built, merged on a passing build at the owner's request, waiting for the owner to test.
+- The tiles look the same; what changes is how topics are chosen. The app takes the 10 most recently opened History articles, asks Wikipedia for their visible categories, and turns the categories into topics (TopicPicker.kt): first ones that several recent articles share, most shared first; then one per recent article, the shortest name. An article's own category ("Vietnam War") is never suggested, nor maintenance, date, birth or alumni categories, nor near-duplicate names. Up to 8; the general placeholder list fills any remaining places, and is used alone while History is empty.
+- Tapping a suggested topic lists the articles in that Wikipedia category, leaving out ones already in the library. Each tile's picture is the first free picture among the category's articles; its icon comes from the topic name.
+- Worked out again when Home opens and the recent History has changed; saved in files/suggested.txt for offline use.
+- Unit tests: TopicPickerTest (7).
+Things raised with the owner as possibly forgotten (not built): a library backup/export (needed before switching to a private signing key, which forces a reinstall), a contact address in the app's requests to Wikipedia, testing on other phones, shared downloads on Android 9 and older, storage management.
+

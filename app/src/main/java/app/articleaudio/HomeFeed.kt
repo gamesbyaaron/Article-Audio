@@ -20,8 +20,11 @@ import kotlin.concurrent.thread
  * fetched once a day and kept for offline use, plus the developer's topic list.
  */
 object HomeFeed {
-    /** A topic tile: the name shown, what is searched for, and its icon if it has no picture. */
-    data class Topic(val label: String, val query: String, val category: String)
+    /**
+     * A topic tile: the name shown, what is searched for, its icon if it has no picture, and
+     * for topics suggested from History, the Wikipedia category whose articles it shows.
+     */
+    data class Topic(val label: String, val query: String, val category: String, val wikiCategory: String? = null)
 
     /** Placeholders until the owner's real list. */
     val TOPICS = listOf(
@@ -34,6 +37,13 @@ object HomeFeed {
         Topic("Renaissance", "Renaissance art", "history"),
         Topic("Philosophy", "philosophy", "person"),
     )
+
+    /** The tiles shown: topics suggested from History, topped up with the general list. */
+    var suggested by mutableStateOf(TOPICS)
+        private set
+    private var suggestedFrom = ""
+    private var suggesting = false
+    private lateinit var suggestionsFile: File
 
     /** For each topic label, the address of a free picture from one of its first articles. */
     var topicPictures by mutableStateOf<Map<String, String>>(emptyMap())
@@ -54,7 +64,9 @@ object HomeFeed {
 
     fun init(context: Context) {
         cache = File(context.filesDir, "home.json")
+        suggestionsFile = File(context.filesDir, "suggested.txt")
         readCache()
+        readSuggestions()
     }
 
     /** Fetches today's content unless it is already here. Shows the saved copy if offline. */
@@ -100,6 +112,77 @@ object HomeFeed {
                     problem = if (featured == null) "Could not load today's articles. Check the internet connection." else ""
                 }
             }
+        }
+    }
+
+    /**
+     * Works out new topics from what the recently heard articles have in common, unless History
+     * has not changed since last time. With nothing heard yet, the general list is shown.
+     */
+    fun refreshSuggestions() {
+        val recent = Library.entries.filter { it.inHistory }.sortedByDescending { it.openedAt }.take(10)
+        val key = recent.joinToString("|") { it.id }
+        if (key == suggestedFrom || suggesting) return
+        if (recent.isEmpty()) {
+            suggested = TOPICS
+            suggestedFrom = key
+            return
+        }
+        suggesting = true
+        thread(name = "suggest") {
+            try {
+                val categories = WikipediaClient.categoriesFor(recent.map { it.title })
+                val picked = TopicPicker.pick(recent.map { it.title to categories[it.title].orEmpty() })
+                val topics = picked.map { Topic(it.label, it.label, Category.of(it.label, it.label), it.category) }
+                val pictures = topics.mapNotNull { t ->
+                    try {
+                        WikipediaClient.categoryMembers(t.wikiCategory!!).firstNotNullOfOrNull { it.thumbnail }?.let { t.label to it }
+                    } catch (e: Throwable) {
+                        null
+                    }
+                }.toMap()
+                val filled = topics + TOPICS.filter { g -> topics.none { it.label == g.label } }.take(maxOf(0, 8 - topics.size))
+                saveSuggestions(key, filled, pictures)
+                main.post {
+                    suggested = filled
+                    topicPictures = topicPictures + pictures
+                    suggestedFrom = key
+                    suggesting = false
+                }
+                DebugLog.i("Suggested topics from ${recent.size} recent articles: ${topics.joinToString { it.label }}")
+            } catch (t: Throwable) {
+                DebugLog.e("Could not suggest topics from History", t)
+                main.post { suggesting = false }
+            }
+        }
+    }
+
+    private fun saveSuggestions(key: String, topics: List<Topic>, pictures: Map<String, String>) {
+        try {
+            val lines = listOf(key) + topics.map {
+                listOf(it.label, it.query, it.category, it.wikiCategory.orEmpty(), pictures[it.label].orEmpty())
+                    .joinToString("\t") { part -> part.replace('\t', ' ').replace('\n', ' ') }
+            }
+            suggestionsFile.writeText(lines.joinToString("\n"))
+        } catch (t: Throwable) {
+            DebugLog.e("Could not save suggested topics", t)
+        }
+    }
+
+    private fun readSuggestions() {
+        try {
+            if (!suggestionsFile.exists()) return
+            val lines = suggestionsFile.readLines()
+            val topics = lines.drop(1).mapNotNull { line ->
+                val p = line.split('\t')
+                if (p.size < 5) null else Topic(p[0], p[1], p[2], p[3].ifEmpty { null }) to p[4]
+            }
+            if (topics.isEmpty()) return
+            suggested = topics.map { it.first }
+            topicPictures = topicPictures + topics.filter { it.second.isNotEmpty() }.associate { it.first.label to it.second }
+            suggestedFrom = lines.first()
+        } catch (t: Throwable) {
+            DebugLog.e("Could not read suggested topics", t)
         }
     }
 
