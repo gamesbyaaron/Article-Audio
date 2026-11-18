@@ -109,6 +109,9 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.Checkbox
 import java.text.DateFormat
 import java.util.Date
 
@@ -176,6 +179,9 @@ object Nav {
     /** The topic shown on the topic screen. */
     var topic by mutableStateOf("" to "")
 
+    /** The collection shown on the collection screen. */
+    var collection by mutableStateOf("")
+
     val tab: String get() = stack.first()
     val canGoBack: Boolean get() = stack.size > 1 || stack.first() != "home"
 
@@ -216,6 +222,8 @@ private fun App(onPlay: () -> Unit) {
         "log" -> LogScreen(onBack = back)
         "article" -> ArticleScreen(onBack = back)
         "topic" -> TopicScreen(onBack = back)
+        "collection" -> CollectionScreen(onBack = back)
+        "queue" -> QueueScreen(onBack = back)
         else -> TabsScreen(onPlay)
     }
 }
@@ -518,6 +526,20 @@ private fun LibraryScreen() {
                 item { StatusLine() }
             }
             item {
+                Text("Collections", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val collections = Collections.all
+                    items(collections.size, key = { collections[it].id }) { i -> CollectionTile(collections[i]) }
+                    item { NewCollectionTile() }
+                }
+            }
+            item {
+                Text(
+                    "Articles",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val filters = listOf("all" to "All", "progress" to "In progress", "finished" to "Finished", "downloaded" to "Downloaded")
                     items(filters.size) { i ->
@@ -538,6 +560,13 @@ private fun LibraryScreen() {
                 }
             } else {
                 items(entries.size, key = { entries[it].id }) { i -> LibraryCard(entries[i]) }
+                item {
+                    Text(
+                        "Press and hold an article for more: play next, add to a collection, rename, delete.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -575,47 +604,169 @@ private fun EmptyLibrary() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** One saved article. Tap to open it; press and hold for more. */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun LibraryCard(entry: LibraryEntry) {
-    OutlinedCard(
-        onClick = {
-            Reader.open(entry.id)
-            Nav.screen = "player"
-        },
-        enabled = !Reader.loading,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-        EntryPicture(entry, 64.dp)
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(entry.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            LinearProgressIndicator(
-                progress = { entry.percent / 100f },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                val progress = when {
-                    entry.position > 0 -> "${entry.percent}%"
-                    entry.finished -> "Finished"
-                    else -> "Not started"
+private fun LibraryCard(entry: LibraryEntry, onTap: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .combinedClickable(
+                        enabled = !Reader.loading,
+                        onClick = onTap ?: {
+                            Reader.open(entry.id)
+                            Nav.screen = "player"
+                        },
+                        onLongClick = { menu = true },
+                    )
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                EntryPicture(entry, 64.dp)
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(entry.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    LinearProgressIndicator(progress = { entry.percent / 100f }, modifier = Modifier.fillMaxWidth())
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val progress = when {
+                            entry.position > 0 -> "${entry.percent}%"
+                            entry.finished -> "Finished"
+                            else -> "Not started"
+                        }
+                        Text(
+                            "$progress · ${maxOf(1, entry.chars / 900)} min · ${day(entry.fetchedAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (entry.hasAudio) AppIcon(R.drawable.ic_download, "Audio downloaded", Modifier.size(16.dp))
+                    }
                 }
-                Text(
-                    "$progress · ${maxOf(1, entry.chars / 900)} min · ${day(entry.fetchedAt)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                if (entry.hasAudio) {
-                    AppIcon(R.drawable.ic_download, "Audio downloaded", Modifier.size(16.dp))
-                }
+                trailing?.invoke()
             }
         }
-        }
+        EntryMenu(entry, expanded = menu, onDismiss = { menu = false })
+    }
+}
+
+/** The press-and-hold menu for a library article. */
+@Composable
+private fun EntryMenu(entry: LibraryEntry, expanded: Boolean, onDismiss: () -> Unit) {
+    var collecting by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(text = { Text("Play next") }, onClick = { onDismiss(); Queue.playNext(entry.id) })
+        DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onDismiss(); Queue.add(entry.id) })
+        DropdownMenuItem(text = { Text("Add to collection…") }, onClick = { onDismiss(); collecting = true })
+        DropdownMenuItem(text = { Text("Rename") }, onClick = { onDismiss(); renaming = true })
+        DropdownMenuItem(
+            text = { Text(if (entry.finished) "Mark as not finished" else "Mark as finished") },
+            onClick = { onDismiss(); Library.setFinished(entry.id, !entry.finished) },
+        )
+        DropdownMenuItem(text = { Text("Delete") }, onClick = { onDismiss(); deleting = true })
+    }
+    if (collecting) AddToCollectionDialog(entry.id, onDone = { collecting = false })
+    if (renaming) RenameDialog(entry, onDone = { renaming = false })
+    if (deleting) {
+        AlertDialog(
+            onDismissRequest = { deleting = false },
+            title = { Text("Delete \"${entry.name}\"?") },
+            text = { Text("This removes the article, your place in it and its downloaded audio from the app, and from any collections.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleting = false
+                    if (Reader.entry?.id == entry.id) Reader.close()
+                    Library.delete(entry.id)
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** Tick the collections an article belongs to, or start a new one with it. */
+@Composable
+private fun AddToCollectionDialog(entryId: String, onDone: () -> Unit) {
+    var newName by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("Add to collection") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (c in Collections.all) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { Collections.toggle(c.id, entryId) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = entryId in c.items, onCheckedChange = { Collections.toggle(c.id, entryId) })
+                        Text(c.name)
+                    }
+                }
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("New collection") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(
+                    onClick = {
+                        Collections.create(newName, entryId)
+                        newName = ""
+                    },
+                    enabled = newName.isNotBlank(),
+                ) { Text("Create and add") }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDone) { Text("Done") } },
+    )
+}
+
+/** A collection as a square: its first article's picture with the name underneath. */
+@Composable
+private fun CollectionTile(c: ArticleCollection) {
+    val first = c.items.firstNotNullOfOrNull { id -> Library.entries.firstOrNull { it.id == id } }
+    Column(
+        modifier = Modifier.width(110.dp).clip(MaterialTheme.shapes.medium).clickable {
+            Nav.collection = c.id
+            Nav.screen = "collection"
+        },
+    ) {
+        if (first != null) EntryPicture(first, 110.dp) else ArticlePicture({ null }, c.id, 110.dp, category = "book")
+        Text(c.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        Text("${c.items.size} articles", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** A square to start a new collection. */
+@Composable
+private fun NewCollectionTile() {
+    var naming by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    Column(modifier = Modifier.width(110.dp).clip(MaterialTheme.shapes.medium).clickable { naming = true }) {
+        Box(
+            modifier = Modifier.size(110.dp).clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) { AppIcon(R.drawable.ic_add, "New collection", Modifier.size(36.dp)) }
+        Text("New collection", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
+    }
+    if (naming) {
+        AlertDialog(
+            onDismissRequest = { naming = false },
+            title = { Text("New collection") },
+            text = { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true) },
+            confirmButton = {
+                TextButton(onClick = {
+                    Collections.create(name)
+                    name = ""
+                    naming = false
+                }, enabled = name.isNotBlank()) { Text("Create") }
+            },
+            dismissButton = { TextButton(onClick = { naming = false }) { Text("Cancel") } },
+        )
     }
 }
 
@@ -899,6 +1050,13 @@ private fun ArticleScreen(onBack: () -> Unit) {
                             }
                         }
                     }
+                    var collecting by remember { mutableStateOf<String?>(null) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { Reader.savePreview { Queue.playNext(it.id) } }) { Text("Play next") }
+                        TextButton(onClick = { Reader.savePreview { Queue.add(it.id) } }) { Text("Add to queue") }
+                        TextButton(onClick = { Reader.savePreview { collecting = it.id } }) { Text("Collection…") }
+                    }
+                    collecting?.let { id -> AddToCollectionDialog(id, onDone = { collecting = null }) }
                     TextButton(onClick = { openOriginal(context, article.title) }) { Text("Open on Wikipedia") }
 
                     val opening = article.chunks.firstOrNull { !it.isHeading }?.text
@@ -915,6 +1073,199 @@ private fun ArticleScreen(onBack: () -> Unit) {
                         modifier = Modifier.padding(bottom = 24.dp),
                     )
                 }
+            }
+        }
+    }
+}
+
+// ---- Collections and queue ----------------------------------------------------------------
+
+/** One collection: play it, reorder or remove its articles, rename or delete it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CollectionScreen(onBack: () -> Unit) {
+    val c = Collections.find(Nav.collection)
+    var menu by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    var newName by remember(c?.id) { mutableStateOf(c?.name.orEmpty()) }
+    var deleting by remember { mutableStateOf(false) }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(c?.name ?: "Collection", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
+                actions = {
+                    if (c != null) Box {
+                        IconButton(onClick = { menu = true }) { AppIcon(R.drawable.ic_more, "More") }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Play from the start") },
+                                onClick = { menu = false; Queue.playAll(c.items, fromStart = true); Nav.screen = "player" },
+                            )
+                            DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; renaming = true })
+                            DropdownMenuItem(text = { Text("Delete collection") }, onClick = { menu = false; deleting = true })
+                        }
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        if (c == null) {
+            Text("This collection no longer exists.", modifier = Modifier.padding(padding).padding(24.dp))
+            return@Scaffold
+        }
+        val entries = c.items.mapNotNull { id -> Library.entries.firstOrNull { it.id == id } }
+        LazyColumn(
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val first = entries.firstOrNull()
+                    if (first != null) EntryPicture(first, 96.dp) else ArticlePicture({ null }, c.id, 96.dp, category = "book")
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(c.name, style = MaterialTheme.typography.headlineSmall)
+                        val minutes = entries.sumOf { it.chars } / 900
+                        Text(
+                            "${entries.size} articles · about $minutes min",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = { Queue.playAll(c.items, fromStart = false); Nav.screen = "player" },
+                    enabled = entries.isNotEmpty(),
+                ) {
+                    AppIcon(R.drawable.ic_play, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Play")
+                }
+                Text(
+                    "Resumes each article where you left off and skips finished ones. " +
+                        "For a fresh listen, use Play from the start in the ⋮ menu.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            if (entries.isEmpty()) {
+                item {
+                    Text(
+                        "No articles yet. Press and hold an article in your Library, or use Collection… on an article's page.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            items(entries.size, key = { entries[it].id }) { i ->
+                val entry = entries[i]
+                LibraryCard(
+                    entry,
+                    onTap = {
+                        // Play the collection from this article on.
+                        Queue.playAll(c.items.drop(c.items.indexOf(entry.id)), fromStart = false)
+                        Nav.screen = "player"
+                    },
+                    trailing = {
+                        ReorderButtons(
+                            first = i == 0,
+                            last = i == entries.lastIndex,
+                            onUp = { Collections.move(c.id, c.items.indexOf(entry.id), c.items.indexOf(entry.id) - 1) },
+                            onDown = { Collections.move(c.id, c.items.indexOf(entry.id), c.items.indexOf(entry.id) + 1) },
+                            onRemove = { Collections.removeItem(c.id, c.items.indexOf(entry.id)) },
+                        )
+                    },
+                )
+            }
+        }
+    }
+    if (renaming && c != null) {
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            title = { Text("Rename collection") },
+            text = { OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true) },
+            confirmButton = { TextButton(onClick = { Collections.rename(c.id, newName); renaming = false }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
+        )
+    }
+    if (deleting && c != null) {
+        AlertDialog(
+            onDismissRequest = { deleting = false },
+            title = { Text("Delete \"${c.name}\"?") },
+            text = { Text("Only the collection is deleted. Its articles stay in your Library.") },
+            confirmButton = {
+                TextButton(onClick = { deleting = false; Collections.delete(c.id); onBack() }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** Up, down and remove buttons for one row of a list the owner arranges. */
+@Composable
+private fun ReorderButtons(first: Boolean, last: Boolean, onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(onClick = onUp, enabled = !first, modifier = Modifier.size(32.dp)) { AppIcon(R.drawable.ic_up, "Move up") }
+        IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) { AppIcon(R.drawable.ic_close, "Remove", Modifier.size(18.dp)) }
+        IconButton(onClick = onDown, enabled = !last, modifier = Modifier.size(32.dp)) { AppIcon(R.drawable.ic_down, "Move down") }
+    }
+}
+
+/** What is playing and what comes next. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QueueScreen(onBack: () -> Unit) {
+    val current = Reader.entry?.let { e -> Library.entries.firstOrNull { it.id == e.id } }
+    val upNext = Queue.upNext.mapNotNull { id -> Library.entries.firstOrNull { it.id == id } }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Queue") },
+                navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
+                actions = { if (upNext.isNotEmpty()) TextButton(onClick = { Queue.clear() }) { Text("Clear") } },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item { Text("Now playing", style = MaterialTheme.typography.titleSmall) }
+            item {
+                if (current != null) LibraryCard(current, onTap = { Nav.screen = "player" })
+                else Text("Nothing is playing.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            item { Text("Up next", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp)) }
+            if (upNext.isEmpty()) {
+                item {
+                    Text(
+                        "Nothing queued. Use Play next or Add to queue on an article's page, or press and hold an article in your Library.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            items(upNext.size, key = { upNext[it].id }) { i ->
+                LibraryCard(
+                    upNext[i],
+                    onTap = {
+                        // Jump to this article: everything before it is skipped.
+                        repeat(i) { Queue.remove(0) }
+                        Queue.next()
+                        Nav.screen = "player"
+                    },
+                    trailing = {
+                        ReorderButtons(
+                            first = i == 0,
+                            last = i == upNext.lastIndex,
+                            onUp = { Queue.move(i, i - 1) },
+                            onDown = { Queue.move(i, i + 1) },
+                            onRemove = { Queue.remove(i) },
+                        )
+                    },
+                )
             }
         }
     }
@@ -940,6 +1291,7 @@ private fun PlayerScreen(onBack: () -> Unit, onPlay: () -> Unit) {
                 navigationIcon = { IconButton(onClick = onBack) { AppIcon(R.drawable.ic_back, "Back") } },
                 actions = {
                     if (article != null && saved != null) {
+                        IconButton(onClick = { Nav.screen = "queue" }) { AppIcon(R.drawable.ic_queue, "Queue") }
                         IconButton(onClick = { Nav.screen = "text" }) { AppIcon(R.drawable.ic_text, "Full text") }
                         Box {
                             IconButton(onClick = { menu = true }) { AppIcon(R.drawable.ic_more, "More") }
@@ -1085,6 +1437,7 @@ private fun PlayerBody(article: Article, saved: LibraryEntry, onPlay: () -> Unit
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            IconButton(onClick = { Queue.previous() }) { AppIcon(R.drawable.ic_skip_prev, "Previous article") }
             SkipButton(R.drawable.ic_replay, "Back 15 seconds") { Reader.skipSeconds(-15) }
             FilledIconButton(
                 onClick = { if (Reader.playing) Reader.pause() else onPlay() },
@@ -1097,6 +1450,9 @@ private fun PlayerBody(article: Article, saved: LibraryEntry, onPlay: () -> Unit
                 )
             }
             SkipButton(R.drawable.ic_forward, "Forward 15 seconds") { Reader.skipSeconds(15) }
+            IconButton(onClick = { Queue.next() }, enabled = Queue.upNext.isNotEmpty()) {
+                AppIcon(R.drawable.ic_skip_next, "Next article")
+            }
         }
 
         var sleepMenu by remember { mutableStateOf(false) }

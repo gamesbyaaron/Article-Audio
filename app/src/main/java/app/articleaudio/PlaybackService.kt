@@ -50,8 +50,18 @@ class PlaybackService : Service() {
         session.setCallback(object : MediaSession.Callback() {
             override fun onPlay() = Reader.play()
             override fun onPause() = Reader.pause()
-            override fun onSkipToNext() = Reader.skipSeconds(15)
-            override fun onSkipToPrevious() = Reader.skipSeconds(-15)
+            override fun onSkipToNext() {
+                Queue.next()
+            }
+            override fun onSkipToPrevious() = Queue.previous()
+            override fun onFastForward() = Reader.skipSeconds(15)
+            override fun onRewind() = Reader.skipSeconds(-15)
+            override fun onCustomAction(action: String, extras: android.os.Bundle?) {
+                when (action) {
+                    CUSTOM_BACK -> Reader.skipSeconds(-15)
+                    CUSTOM_FORWARD -> Reader.skipSeconds(15)
+                }
+            }
             override fun onStop() = Reader.stop()
         })
         session.isActive = true
@@ -80,8 +90,10 @@ class PlaybackService : Service() {
         }
         when (intent?.action) {
             ACTION_TOGGLE -> if (Reader.playing) Reader.pause() else Reader.play()
-            ACTION_NEXT -> Reader.skipSeconds(15)
-            ACTION_PREVIOUS -> Reader.skipSeconds(-15)
+            ACTION_FORWARD -> Reader.skipSeconds(15)
+            ACTION_BACK -> Reader.skipSeconds(-15)
+            ACTION_NEXT -> Queue.next()
+            ACTION_PREVIOUS -> Queue.previous()
             ACTION_STOP -> Reader.stop()
         }
         refresh()
@@ -117,7 +129,15 @@ class PlaybackService : Service() {
                 .setActions(
                     PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
                         PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                        PlaybackState.ACTION_FAST_FORWARD or PlaybackState.ACTION_REWIND or
                         PlaybackState.ACTION_STOP
+                )
+                // Newer Android shows these beside previous/next on the lock screen.
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder(CUSTOM_BACK, "Back 15 seconds", android.R.drawable.ic_media_rew).build()
+                )
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder(CUSTOM_FORWARD, "Forward 15 seconds", android.R.drawable.ic_media_ff).build()
                 )
                 .setState(
                     if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
@@ -146,17 +166,24 @@ class PlaybackService : Service() {
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOngoing(playing)
             .setOnlyAlertOnce(true)
-            .addAction(action(android.R.drawable.ic_media_previous, "Back 15 seconds", ACTION_PREVIOUS, 1))
+            .addAction(action(android.R.drawable.ic_media_previous, "Previous article", ACTION_PREVIOUS, 1))
+            .addAction(action(android.R.drawable.ic_media_rew, "Back 15 seconds", ACTION_BACK, 5))
             .addAction(
                 if (playing) action(android.R.drawable.ic_media_pause, "Pause", ACTION_TOGGLE, 2)
                 else action(android.R.drawable.ic_media_play, "Play", ACTION_TOGGLE, 2)
             )
-            .addAction(action(android.R.drawable.ic_media_next, "Forward 15 seconds", ACTION_NEXT, 3))
-            .addAction(action(android.R.drawable.ic_menu_close_clear_cancel, "Stop", ACTION_STOP, 4))
+            .addAction(action(android.R.drawable.ic_media_ff, "Forward 15 seconds", ACTION_FORWARD, 6))
+            .addAction(action(android.R.drawable.ic_media_next, "Next article", ACTION_NEXT, 3))
+            // Swiping the notification away while paused stops playback.
+            .setDeleteIntent(
+                PendingIntent.getForegroundService(
+                    this, 4, Intent(this, PlaybackService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,
+                )
+            )
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(session.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
+                    .setShowActionsInCompactView(1, 2, 3)
             )
             .build()
     }
@@ -176,6 +203,10 @@ class PlaybackService : Service() {
         private const val ACTION_NEXT = "app.articleaudio.NEXT"
         private const val ACTION_PREVIOUS = "app.articleaudio.PREVIOUS"
         private const val ACTION_STOP = "app.articleaudio.STOP"
+        private const val ACTION_BACK = "app.articleaudio.BACK15"
+        private const val ACTION_FORWARD = "app.articleaudio.FORWARD15"
+        private const val CUSTOM_BACK = "back15"
+        private const val CUSTOM_FORWARD = "forward15"
 
         fun start(context: Context) {
             try {

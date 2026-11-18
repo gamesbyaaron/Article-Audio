@@ -423,14 +423,33 @@ object Reader : Speaker.Listener {
         }
     }
 
-    /** Opens a library article and starts playing where it was left. */
-    fun openAndPlay(id: String) {
+    /** Opens a library article and starts playing where it was left, or from the start if [restart]. */
+    fun openAndPlay(id: String, restart: Boolean = false) {
         if (entry?.id == id && article != null) {
+            if (restart) restartArticle()
             if (!playing) play()
             return
         }
         playWhenOpened = true
         open(id)
+    }
+
+    /** Back to the start of the open article, keeping it playing if it was. */
+    fun restartArticle() {
+        if (article == null) return
+        if (audioMode) seekAudio(0) else jumpTo(0)
+    }
+
+    /** Saves the previewed article to the library (if it is not there yet), then hands it over. */
+    fun savePreview(then: (LibraryEntry) -> Unit) {
+        val p = preview ?: return
+        val a = p.article ?: return
+        thread(name = "save") {
+            val saved = Library.find(Wav.fileName(a.title))
+                ?: Library.save(a.title, p.text, a.sentences.size, resetPosition = false, description = p.description)
+            if (!saved.imageChecked) thread(name = "picture") { fetchPicture(saved) }
+            main.post { then(saved) }
+        }
     }
 
     /** Closes the open article, for example after it is deleted. */
@@ -567,9 +586,12 @@ object Reader : Speaker.Listener {
         focus.abandon()
         savePosition(force = true)
         entry?.let { Library.markFinished(it.id) }
+        val sleeping = sleepMode == "article"
         if (sleepMode.isNotEmpty()) clearSleep()
         DebugLog.i("Finished \"$name\"")
         notifyChanged()
+        // Carry on with the queue, unless a sleep timer was set for the end of this article.
+        if (!sleeping) main.post { Queue.next() }
     }
 
     fun play() {
